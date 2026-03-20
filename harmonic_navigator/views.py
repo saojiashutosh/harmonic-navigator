@@ -4,7 +4,7 @@ from rest_framework import status
 import django
 
 
-class HarmonicViewSet(ModelViewSet):
+class HarmonicBaseViewSet(ModelViewSet):
     # renderer_classes = AtomicJsonRenderer
 
     # # TODO  write queryset

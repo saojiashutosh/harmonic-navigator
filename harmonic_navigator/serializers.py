@@ -9,29 +9,35 @@ class HarmonicBaseSerializer(serializers.ModelSerializer):
     updatedAt = serializers.SerializerMethodField()
 
     def get_createdAt(self, instance):
-        timezone = self.context['request'].META.get(
-            'HTTP_X_TIMEZONE_REGION', None)
+        request = self.context.get('request')
+        timezone = request.META.get('HTTP_X_TIMEZONE_REGION', None) if request else None
         return convert_time(instance.createdAt, timezone)
 
     def get_updatedAt(self, instance):
-        timezone = self.context['request'].META.get(
-            'HTTP_X_TIMEZONE_REGION', None)
+        request = self.context.get('request')
+        timezone = request.META.get('HTTP_X_TIMEZONE_REGION', None) if request else None
         return convert_time(instance.updatedAt, timezone)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        action = self.context["view"].action
-        permission = self.context["request"].user == instance.id
+        view = self.context.get("view")
+        request = self.context.get("request")
+        action = getattr(view, "action", None)
+        permission = bool(
+            request and getattr(request, "user", None) == getattr(instance, "id", None)
+        )
         if action == "list":
+            list_fields = getattr(self.Meta, "list_fields", self.Meta.fields)
             return OrderedDict(
                 {key: data[key]
-                    for key in data if key in self.Meta.list_fields}
+                    for key in data if key in list_fields}
             )
         if action == "retrieve":
+            get_fields = getattr(self.Meta, "get_fields", self.Meta.fields)
             if not permission:
                 return data
             return OrderedDict(
-                {key: data[key] for key in data if key in self.Meta.get_fields}
+                {key: data[key] for key in data if key in get_fields}
             )
         return data
 

@@ -1,5 +1,23 @@
-from django_filters import FilterSet
-import django_filters
+try:
+    from django_filters import FilterSet
+    import django_filters
+except ModuleNotFoundError:
+    class FilterSet:
+        pass
+
+    class _BaseFilter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _DjangoFiltersFallback:
+        DateTimeFilter = _BaseFilter
+        CharFilter = _BaseFilter
+        BooleanFilter = _BaseFilter
+
+        class BaseCSVFilter:
+            pass
+
+    django_filters = _DjangoFiltersFallback()
 import pytz
 from django.utils import timezone
 from datetime import datetime, timedelta
@@ -161,3 +179,7 @@ class MultiValueCharFilter(django_filters.BaseCSVFilter, django_filters.CharFilt
             return qs
         lookup = "%s__%s" % (self.field_name, self.lookup_expr)
         return qs.filter(**{lookup: value})
+
+
+class HarmonicBaseFilterSet(FilterSet):
+    pass
