@@ -25,11 +25,11 @@ from datetime import datetime, timedelta
 
 class HarmonicDateFilter(FilterSet):
     fromDate = django_filters.DateTimeFilter(
-        field_name='createdAt', method='filter_fromDate')
+        field_name='createdAt', method='filter_from_date')
     toDate = django_filters.DateTimeFilter(
-        field_name='createdAt', method='filter_toDate')
+        field_name='createdAt', method='filter_to_date')
 
-    def filter_fromDate(self, queryset, name, value):
+    def filter_from_date(self, queryset, name, value):
         try:
             tz = pytz.timezone(self.request.META.get(
                 'HTTP_X_TIMEZONE_REGION', 'UTC'))
@@ -39,7 +39,7 @@ class HarmonicDateFilter(FilterSet):
         value = tz.localize(value)
         return queryset.filter(createdAt__gte=value)
 
-    def filter_toDate(self, queryset, name, value):
+    def filter_to_date(self, queryset, name, value):
         try:
             tz = pytz.timezone(self.request.META.get(
                 'HTTP_X_TIMEZONE_REGION', 'UTC'))
@@ -60,11 +60,11 @@ class HarmonicUserFilter(FilterSet):
     email = django_filters.CharFilter(
         field_name='userId__email', lookup_expr='exact')
     fromDate = django_filters.DateTimeFilter(
-        field_name='createdAt', method='filter_fromDate')
+        field_name='createdAt', method='filter_from_date')
     toDate = django_filters.DateTimeFilter(
-        field_name='createdAt', method='filter_toDate')
+        field_name='createdAt', method='filter_to_date')
 
-    def filter_fromDate(self, queryset, name, value):
+    def filter_from_date(self, queryset, name, value):
         try:
             tz = pytz.timezone(self.request.META.get(
                 'HTTP_X_TIMEZONE_REGION', 'UTC'))
@@ -74,7 +74,7 @@ class HarmonicUserFilter(FilterSet):
         value = tz.localize(value)
         return queryset.filter(createdAt__gte=value)
 
-    def filter_toDate(self, queryset, name, value):
+    def filter_to_date(self, queryset, name, value):
         try:
             tz = pytz.timezone(self.request.META.get(
                 'HTTP_X_TIMEZONE_REGION', 'UTC'))

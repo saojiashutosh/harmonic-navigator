@@ -5,15 +5,15 @@ from utils.time import convert_time
 
 class HarmonicBaseSerializer(serializers.ModelSerializer):
 
-    createdAt = serializers.SerializerMethodField()
-    updatedAt = serializers.SerializerMethodField()
+    createdAt = serializers.SerializerMethodField(method_name="get_created_at")
+    updatedAt = serializers.SerializerMethodField(method_name="get_updated_at")
 
-    def get_createdAt(self, instance):
+    def get_created_at(self, instance):
         request = self.context.get('request')
         timezone = request.META.get('HTTP_X_TIMEZONE_REGION', None) if request else None
         return convert_time(instance.createdAt, timezone)
 
-    def get_updatedAt(self, instance):
+    def get_updated_at(self, instance):
         request = self.context.get('request')
         timezone = request.META.get('HTTP_X_TIMEZONE_REGION', None) if request else None
         return convert_time(instance.updatedAt, timezone)
