@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from math import exp
-
 from django.db import transaction
 from django.utils import timezone
 
-from moods.constants import OPTION_WEIGHTS, QUESTION_WEIGHTS
+from moods.inference import (
+    build_weight_key,
+    infer_mood_from_responses,
+    normalise_answer_value,
+)
 from moods.models import Answer, MoodInference, MoodSession, Question
 
 
@@ -47,31 +49,6 @@ def _validate_answers(answers: list[dict]) -> None:
         raise ValueError(f"Unknown or inactive question keys: {unknown}")
 
 
-def _normalise_value(raw_value: str, question: Question) -> float:
-    if question.inputType == Question.InputTypeChoices.SLIDER:
-        try:
-            value = float(raw_value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"Question '{question.key}' expects a float, got '{raw_value}'."
-            ) from exc
-        if not 0.0 <= value <= 1.0:
-            raise ValueError(
-                f"Question '{question.key}' value must be between 0.0 and 1.0, got {value}."
-            )
-        return value
-
-    if question.inputType == Question.InputTypeChoices.SELECT:
-        if raw_value not in OPTION_WEIGHTS:
-            valid = sorted(OPTION_WEIGHTS.keys())
-            raise ValueError(
-                f"Unknown option '{raw_value}' for question '{question.key}'. Valid options: {valid}"
-            )
-        return OPTION_WEIGHTS[raw_value]
-
-    raise ValueError(f"Unsupported input type '{question.inputType}'.")
-
-
 def _save_answers(session: MoodSession, answers: list[dict]) -> None:
     question_map = {
         question.key: question
@@ -90,7 +67,7 @@ def _save_answers(session: MoodSession, answers: list[dict]) -> None:
                 moodSessionId=session,
                 questionId=question,
                 rawValue=raw_value,
-                value=_normalise_value(raw_value, question),
+                value=normalise_answer_value(raw_value, question),
             )
         )
 
@@ -102,25 +79,20 @@ def _infer_mood(session: MoodSession) -> MoodInference:
     if existing:
         return existing
 
-    scores = {label: 0.0 for label in _all_mood_labels()}
     answers = session.answer.select_related("questionId").all()
-
-    for answer in answers:
-        for mood_label, weight in QUESTION_WEIGHTS.get(answer.questionId.key, {}).items():
-            scores[mood_label] += weight * answer.value
-
-    exp_scores = {mood: exp(score) for mood, score in scores.items()}
-    total = sum(exp_scores.values())
-    probabilities = {
-        mood: round(score / total, 4)
-        for mood, score in exp_scores.items()
-    }
-    top_mood = max(probabilities, key=probabilities.get)
+    responses = [
+        {
+            "weight_key": build_weight_key(answer.questionId, answer.rawValue),
+            "value": answer.value,
+        }
+        for answer in answers
+    ]
+    top_mood, confidence, probabilities = infer_mood_from_responses(responses)
 
     return MoodInference.objects.create(
         moodSessionId=session,
         moodLabel=top_mood,
-        confidence=probabilities[top_mood],
+        confidence=confidence,
         rawScores=probabilities,
     )
 
@@ -130,7 +102,3 @@ def _close_session(session: MoodSession) -> None:
     session.endedAt = now
     session.durationSeconds = int((now - session.startedAt).total_seconds())
     session.save(update_fields=["endedAt", "durationSeconds"])
-
-
-def _all_mood_labels() -> list[str]:
-    return [choice[0] for choice in MoodInference.MoodChoices.choices]

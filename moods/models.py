@@ -60,7 +60,6 @@ class Question(HarmonicBaseModel):
         PREFERENCE = "preference", "Preference"
 
     class InputTypeChoices(models.TextChoices):
-        SLIDER = "slider", "Slider"
         SELECT = "select", "Select"
 
     key = models.CharField(
@@ -88,7 +87,7 @@ class Question(HarmonicBaseModel):
     inputType = models.CharField(
         max_length=16,
         choices=InputTypeChoices.choices,
-        default=InputTypeChoices.SLIDER,
+        default=InputTypeChoices.SELECT,
         verbose_name=_("Input Type"),
         db_column="input_type",
     )

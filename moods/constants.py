@@ -7,14 +7,14 @@ QUESTION_DEFINITIONS = [
         "key": "energy_level",
         "text": "How much energy do you have right now?",
         "category": "energy",
-        "inputType": "slider",
+        "inputType": "select",
         "order": 1,
         "options": [
-            {"value": 0.0, "label": "Completely drained"},
-            {"value": 0.25, "label": "Low, running on empty"},
-            {"value": 0.5, "label": "Somewhere in the middle"},
-            {"value": 0.75, "label": "Pretty good"},
-            {"value": 1.0, "label": "Fully charged"},
+            {"rawValue": "drained", "label": "Completely drained"},
+            {"rawValue": "low", "label": "Low, running on empty"},
+            {"rawValue": "mid", "label": "Somewhere in the middle"},
+            {"rawValue": "good", "label": "Pretty good"},
+            {"rawValue": "charged", "label": "Fully charged"},
         ],
     },
     {
@@ -90,12 +90,44 @@ QUESTION_DEFINITIONS = [
 ]
 
 QUESTION_WEIGHTS = {
-    "energy_level": {
-        "energized": 0.45,
-        "celebratory": 0.20,
+    "energy_level_drained": {
+        "calm": 0.45,
+        "melancholic": 0.55,
+        "anxious": 0.15,
+        "focused": -0.20,
+        "energized": -0.50,
+        "celebratory": -0.45,
+    },
+    "energy_level_low": {
+        "calm": 0.30,
+        "melancholic": 0.35,
+        "anxious": 0.10,
+        "focused": -0.10,
+        "energized": -0.30,
+        "celebratory": -0.25,
+    },
+    "energy_level_mid": {
+        "focused": 0.35,
+        "calm": 0.15,
+        "melancholic": 0.05,
+        "anxious": 0.00,
+        "energized": 0.05,
+        "celebratory": 0.00,
+    },
+    "energy_level_good": {
+        "energized": 0.35,
+        "focused": 0.25,
+        "celebratory": 0.15,
+        "calm": -0.10,
+        "melancholic": -0.15,
+        "anxious": 0.05,
+    },
+    "energy_level_charged": {
+        "energized": 0.55,
+        "celebratory": 0.35,
         "focused": 0.15,
-        "calm": -0.20,
-        "melancholic": -0.25,
+        "calm": -0.25,
+        "melancholic": -0.30,
         "anxious": 0.10,
     },
     "emotional_tone_happy": {
@@ -301,6 +333,11 @@ QUESTION_WEIGHTS = {
 }
 
 OPTION_WEIGHTS = {
+    "drained": 1.0,
+    "low": 1.0,
+    "mid": 1.0,
+    "good": 1.0,
+    "charged": 1.0,
     "happy": 1.0,
     "calm": 0.75,
     "sad": 0.25,
