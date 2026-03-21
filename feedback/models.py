@@ -1,19 +1,19 @@
-from django.utils.translation import gettext_lazy as _
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils.translation import gettext_lazy as _
+
 from harmonic_navigator.models import HarmonicBaseModel
 
 
 class TrackFeedback(HarmonicBaseModel):
-
     class ActionChoices(models.TextChoices):
-        LIKE = "like",     "Like"
-        SKIP = "skip",     "Skip"
+        LIKE = "like", "Like"
+        SKIP = "skip", "Skip"
         COMPLETE = "complete", "Complete"
-        DISLIKE = "dislike",  "Dislike"
+        DISLIKE = "dislike", "Dislike"
 
-    user = models.ForeignKey(
+    userId = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="track_feedbacks",
@@ -21,7 +21,7 @@ class TrackFeedback(HarmonicBaseModel):
         verbose_name=_("user"),
     )
 
-    track = models.ForeignKey(
+    trackId = models.ForeignKey(
         "tracks.Track",
         on_delete=models.CASCADE,
         related_name="feedbacks",
@@ -29,7 +29,7 @@ class TrackFeedback(HarmonicBaseModel):
         verbose_name=_("track"),
     )
 
-    playlist = models.ForeignKey(
+    playlistId = models.ForeignKey(
         "playlists.Playlist",
         on_delete=models.SET_NULL,
         null=True,
@@ -38,7 +38,7 @@ class TrackFeedback(HarmonicBaseModel):
         verbose_name=_("playlist"),
     )
 
-    playlist_track = models.ForeignKey(
+    playlistTrackId = models.ForeignKey(
         "playlists.PlaylistTrack",
         on_delete=models.SET_NULL,
         null=True,
@@ -47,7 +47,7 @@ class TrackFeedback(HarmonicBaseModel):
         verbose_name=_("playlist track"),
     )
 
-    mood_session = models.ForeignKey(
+    moodSessionId = models.ForeignKey(
         "moods.MoodSession",
         on_delete=models.SET_NULL,
         null=True,
@@ -63,14 +63,14 @@ class TrackFeedback(HarmonicBaseModel):
         choices=ActionChoices.choices,
     )
 
-    listen_progress = models.FloatField(
+    listenProgress = models.FloatField(
         verbose_name=_("listen progress"),
         db_column="listen_progress",
         null=True,
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
     )
 
-    mood_label = models.CharField(
+    moodLabel = models.CharField(
         max_length=32,
         verbose_name=_("mood label"),
         db_column="mood_label",
@@ -88,8 +88,7 @@ class TrackFeedback(HarmonicBaseModel):
 
 
 class UserMoodPreference(HarmonicBaseModel):
-
-    user = models.ForeignKey(
+    userId = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="mood_preferences",
@@ -97,47 +96,47 @@ class UserMoodPreference(HarmonicBaseModel):
         verbose_name=_("user"),
     )
 
-    mood_label = models.CharField(
+    moodLabel = models.CharField(
         max_length=32,
         verbose_name=_("mood label"),
         db_column="mood_label",
     )
 
-    song_weight = models.FloatField(
+    songWeight = models.FloatField(
         verbose_name=_("song weight"),
         db_column="song_weight",
         default=0.60,
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
     )
 
-    instrumental_weight = models.FloatField(
+    instrumentalWeight = models.FloatField(
         verbose_name=_("instrumental weight"),
         db_column="instrumental_weight",
         default=0.30,
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
     )
 
-    ambient_weight = models.FloatField(
+    ambientWeight = models.FloatField(
         verbose_name=_("ambient weight"),
         db_column="ambient_weight",
         default=0.10,
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
     )
 
-    novelty_score = models.FloatField(
+    noveltyScore = models.FloatField(
         verbose_name=_("novelty score"),
         db_column="novelty_score",
         default=0.20,
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
     )
 
-    sample_count = models.PositiveIntegerField(
+    sampleCount = models.PositiveIntegerField(
         verbose_name=_("sample count"),
         db_column="sample_count",
         default=0,
     )
 
-    last_computed_at = models.DateTimeField(
+    lastComputedAt = models.DateTimeField(
         verbose_name=_("last computed at"),
         db_column="last_computed_at",
         null=True,
@@ -154,12 +153,11 @@ class UserMoodPreference(HarmonicBaseModel):
 
     @property
     def is_reliable(self):
-        return self.sample_count >= 10
+        return self.sampleCount >= 10
 
 
 class TrackMoodScore(HarmonicBaseModel):
-
-    user = models.ForeignKey(
+    userId = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="track_mood_scores",
@@ -167,7 +165,7 @@ class TrackMoodScore(HarmonicBaseModel):
         verbose_name=_("user"),
     )
 
-    track = models.ForeignKey(
+    trackId = models.ForeignKey(
         "tracks.Track",
         on_delete=models.CASCADE,
         related_name="mood_scores",
@@ -175,7 +173,7 @@ class TrackMoodScore(HarmonicBaseModel):
         verbose_name=_("track"),
     )
 
-    mood_label = models.CharField(
+    moodLabel = models.CharField(
         max_length=32,
         verbose_name=_("mood label"),
         db_column="mood_label",
@@ -188,31 +186,31 @@ class TrackMoodScore(HarmonicBaseModel):
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
     )
 
-    like_count = models.PositiveIntegerField(
+    likeCount = models.PositiveIntegerField(
         default=0,
         db_column="like_count",
         verbose_name=_("like count"),
     )
 
-    dislike_count = models.PositiveIntegerField(
+    dislikeCount = models.PositiveIntegerField(
         default=0,
         db_column="dislike_count",
         verbose_name=_("dislike count"),
     )
 
-    skip_count = models.PositiveIntegerField(
+    skipCount = models.PositiveIntegerField(
         default=0,
         db_column="skip_count",
         verbose_name=_("skip count"),
     )
 
-    complete_count = models.PositiveIntegerField(
+    completeCount = models.PositiveIntegerField(
         default=0,
         db_column="complete_count",
         verbose_name=_("complete count"),
     )
 
-    last_updated_at = models.DateTimeField(
+    lastUpdatedAt = models.DateTimeField(
         verbose_name=_("last updated at"),
         db_column="last_updated_at",
         null=True,
