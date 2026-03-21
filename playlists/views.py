@@ -13,7 +13,7 @@ class PlaylistViewSet(HarmonicBaseViewSet):
         'createdAt',
         'updatedAt',
         'confidence',
-        'track_count',
+        'trackCount',
     )
 
 

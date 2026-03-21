@@ -8,14 +8,14 @@ class PlaylistAdmin(admin.ModelAdmin):
         'id',
         'createdAt',
         'updatedAt',
-        'user',
-        'mood_inference',
-        'mood_label',
+        'userId',
+        'moodInferenceId',
+        'moodLabel',
         'confidence',
         'status',
-        'is_saved',
-        'saved_at',
-        'track_count',
+        'isSaved',
+        'savedAt',
+        'trackCount',
     )
 
 
@@ -25,13 +25,13 @@ class PlaylistTrackAdmin(admin.ModelAdmin):
         'id',
         'createdAt',
         'updatedAt',
-        'playlist',
-        'track',
+        'playlistId',
+        'trackId',
         'position',
-        'selection_reason',
-        'relevance_score',
-        'play_state',
-        'played_at',
+        'selectionReason',
+        'relevanceScore',
+        'playState',
+        'playedAt',
     )
 
 
@@ -41,8 +41,8 @@ class SavedPlaylistAdmin(admin.ModelAdmin):
         'id',
         'createdAt',
         'updatedAt',
-        'user',
-        'playlist',
+        'userId',
+        'playlistId',
         'name',
     )
 

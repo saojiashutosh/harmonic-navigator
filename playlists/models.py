@@ -1,17 +1,18 @@
-from django.utils.translation import gettext_lazy as _
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils.translation import gettext_lazy as _
+
 from harmonic_navigator.models import HarmonicBaseModel
 
 
 class Playlist(HarmonicBaseModel):
     class StatusChoices(models.TextChoices):
-        PENDING = "pending",   "Pending"
-        READY = "ready",     "Ready"
-        FAILED = "failed",    "Failed"
+        PENDING = "pending", "Pending"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
 
-    user = models.ForeignKey(
+    userId = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="playlists",
@@ -19,7 +20,7 @@ class Playlist(HarmonicBaseModel):
         verbose_name=_("user"),
     )
 
-    mood_inference = models.ForeignKey(
+    moodInferenceId = models.ForeignKey(
         "moods.MoodInference",
         on_delete=models.SET_NULL,
         null=True,
@@ -28,7 +29,7 @@ class Playlist(HarmonicBaseModel):
         verbose_name=_("mood inference"),
     )
 
-    mood_label = models.CharField(
+    moodLabel = models.CharField(
         max_length=32,
         verbose_name=_("mood label"),
         db_column="mood_label",
@@ -49,19 +50,19 @@ class Playlist(HarmonicBaseModel):
         default=StatusChoices.PENDING,
     )
 
-    is_saved = models.BooleanField(
+    isSaved = models.BooleanField(
         verbose_name=_("is saved"),
         db_column="is_saved",
         default=False,
     )
-    saved_at = models.DateTimeField(
+    savedAt = models.DateTimeField(
         verbose_name=_("saved at"),
         db_column="saved_at",
         null=True,
         blank=True,
     )
 
-    track_count = models.PositiveSmallIntegerField(
+    trackCount = models.PositiveSmallIntegerField(
         verbose_name=_("track count"),
         db_column="track_count",
         default=0,
@@ -74,23 +75,22 @@ class Playlist(HarmonicBaseModel):
         managed = True
 
     def __str__(self):
-        return f"{self.mood_label} playlist — {self.user} ({self.status})"
+        return f"{self.moodLabel} playlist - {self.userId} ({self.status})"
 
 
 class PlaylistTrack(HarmonicBaseModel):
-
     class SelectionReason(models.TextChoices):
-        MOOD_MATCH = "mood_match",  "Mood Match"
-        TAG_MATCH = "tag_match",   "Tag Match"
-        NOVELTY = "novelty",     "Novelty"
-        FALLBACK = "fallback",    "Fallback"
+        MOOD_MATCH = "mood_match", "Mood Match"
+        TAG_MATCH = "tag_match", "Tag Match"
+        NOVELTY = "novelty", "Novelty"
+        FALLBACK = "fallback", "Fallback"
 
     class PlayState(models.TextChoices):
-        QUEUED = "queued",    "Queued"
-        PLAYED = "played",   "Played"
-        SKIPPED = "skipped",  "Skipped"
+        QUEUED = "queued", "Queued"
+        PLAYED = "played", "Played"
+        SKIPPED = "skipped", "Skipped"
 
-    playlist = models.ForeignKey(
+    playlistId = models.ForeignKey(
         Playlist,
         on_delete=models.CASCADE,
         related_name="playlist_tracks",
@@ -98,7 +98,7 @@ class PlaylistTrack(HarmonicBaseModel):
         verbose_name=_("playlist"),
     )
 
-    track = models.ForeignKey(
+    trackId = models.ForeignKey(
         "tracks.Track",
         on_delete=models.CASCADE,
         related_name="playlist_tracks",
@@ -112,7 +112,7 @@ class PlaylistTrack(HarmonicBaseModel):
         validators=[MinValueValidator(1)],
     )
 
-    selection_reason = models.CharField(
+    selectionReason = models.CharField(
         max_length=16,
         verbose_name=_("selection reason"),
         db_column="selection_reason",
@@ -120,14 +120,14 @@ class PlaylistTrack(HarmonicBaseModel):
         default=SelectionReason.MOOD_MATCH,
     )
 
-    relevance_score = models.FloatField(
+    relevanceScore = models.FloatField(
         verbose_name=_("relevance score"),
         db_column="relevance_score",
         null=True,
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
     )
 
-    play_state = models.CharField(
+    playState = models.CharField(
         max_length=16,
         verbose_name=_("play state"),
         db_column="play_state",
@@ -135,7 +135,7 @@ class PlaylistTrack(HarmonicBaseModel):
         default=PlayState.QUEUED,
     )
 
-    played_at = models.DateTimeField(
+    playedAt = models.DateTimeField(
         verbose_name=_("played at"),
         db_column="played_at",
         null=True,
@@ -149,19 +149,19 @@ class PlaylistTrack(HarmonicBaseModel):
         managed = True
 
     def __str__(self):
-        return f"{self.playlist} — #{self.position} {self.track}"
+        return f"{self.playlistId} - #{self.position} {self.trackId}"
 
 
 class SavedPlaylist(HarmonicBaseModel):
-
-    user = models.ForeignKey(
+    userId = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="saved_playlists",
         db_column="user_id",
         verbose_name=_("user"),
     )
 
-    playlist = models.ForeignKey(
+    playlistId = models.ForeignKey(
         Playlist,
         on_delete=models.CASCADE,
         related_name="saves",
@@ -184,4 +184,4 @@ class SavedPlaylist(HarmonicBaseModel):
         managed = True
 
     def __str__(self):
-        return f"{self.user} saved → {self.playlist}"
+        return f"{self.userId} saved -> {self.playlistId}"
