@@ -1,6 +1,7 @@
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from moods.constants import QUESTION_DEFINITIONS
 from moods.models import Answer, MoodInference, MoodSession, Question
 from users.models import Users
 
@@ -19,22 +20,15 @@ class MoodFlowTests(APITestCase):
         Question.objects.bulk_create(
             [
                 Question(
-                    key="energy_level",
-                    text="How energetic do you feel?",
-                    category=Question.CategoryChoices.ENERGY,
-                    inputType=Question.InputTypeChoices.SLIDER,
-                    order=1,
+                    key=definition["key"],
+                    text=definition["text"],
+                    category=definition["category"],
+                    inputType=definition["inputType"],
+                    options=definition["options"],
+                    order=definition["order"],
                     isActive=True,
-                ),
-                Question(
-                    key="activity_working",
-                    text="What are you doing?",
-                    category=Question.CategoryChoices.ACTIVITY,
-                    inputType=Question.InputTypeChoices.SELECT,
-                    options=["working", "other"],
-                    order=2,
-                    isActive=True,
-                ),
+                )
+                for definition in QUESTION_DEFINITIONS
             ]
         )
 
@@ -42,7 +36,7 @@ class MoodFlowTests(APITestCase):
         self.client.force_authenticate(user=self.user)
 
     def test_create_session(self):
-        response = self.client.post("/api/moods/mood-sessions/")
+        response = self.client.post("/moods/mood-sessions/")
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(MoodSession.objects.count(), 1)
@@ -52,18 +46,22 @@ class MoodFlowTests(APITestCase):
         session = MoodSession.objects.create(userId=self.user)
 
         response = self.client.post(
-            f"/api/moods/mood-sessions/{session.id}/submit/",
+            f"/moods/mood-sessions/{session.id}/submit/",
             {
                 "answers": [
                     {"question_key": "energy_level", "raw_value": "0.8"},
-                    {"question_key": "activity_working", "raw_value": "working"},
+                    {"question_key": "emotional_tone", "raw_value": "happy"},
+                    {"question_key": "mental_state", "raw_value": "sharp"},
+                    {"question_key": "activity", "raw_value": "working"},
+                    {"question_key": "social_setting", "raw_value": "alone"},
+                    {"question_key": "music_preference", "raw_value": "lyrics"},
                 ]
             },
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(Answer.objects.filter(moodSessionId=session).count(), 2)
+        self.assertEqual(Answer.objects.filter(moodSessionId=session).count(), 6)
 
         inference = MoodInference.objects.get(moodSessionId=session)
         self.assertEqual(response.data["id"], str(inference.id))
@@ -78,7 +76,7 @@ class MoodFlowTests(APITestCase):
         session = MoodSession.objects.create(userId=self.user)
 
         response = self.client.post(
-            f"/api/moods/mood-sessions/{session.id}/submit/",
+            f"/moods/mood-sessions/{session.id}/submit/",
             {
                 "answers": [
                     {"question_key": "energy_level", "raw_value": "0.3"},

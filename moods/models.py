@@ -54,8 +54,10 @@ class Question(HarmonicBaseModel):
     class CategoryChoices(models.TextChoices):
         ENERGY = "energy", "Energy"
         EMOTION = "emotion", "Emotion"
+        COGNITION = "cognition", "Cognition"
         ACTIVITY = "activity", "Activity"
         CONTEXT = "context", "Context"
+        PREFERENCE = "preference", "Preference"
 
     class InputTypeChoices(models.TextChoices):
         SLIDER = "slider", "Slider"
