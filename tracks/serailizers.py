@@ -1,3 +1,5 @@
+from rest_framework import serializers
+
 from harmonic_navigator.serializers import HarmonicBaseSerializer
 from .models import (
     MoodTag,
@@ -36,6 +38,7 @@ class ArtistSerializer(HarmonicBaseSerializer):
 
 
 class TrackSerializer(HarmonicBaseSerializer):
+    durationMinutes = serializers.CharField(source="duration_minutes", read_only=True)
 
     class Meta:
         model = Track

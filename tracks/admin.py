@@ -21,7 +21,7 @@ class ArtistAdmin(admin.ModelAdmin):
         'createdAt',
         'updatedAt',
         'name',
-        'spotify_id',
+        'spotifyId',
     )
 
 
@@ -32,13 +32,13 @@ class TrackAdmin(admin.ModelAdmin):
         'createdAt',
         'updatedAt',
         'title',
-        'artist',
+        'artistId',
         'type',
         'source',
-        'spotify_id',
-        'tempo_bpm',
-        'duration_ms',
-        'is_active',
+        'spotifyId',
+        'tempoBpm',
+        'durationMs',
+        'isActive',
     )
 
 
@@ -48,10 +48,10 @@ class TrackMoodTagAdmin(admin.ModelAdmin):
         'id',
         'createdAt',
         'updatedAt',
-        'track',
-        'mood_tag',
+        'trackId',
+        'moodTagId',
         'weight',
-        'tag_source',
+        'tagSource',
     )
 
 
@@ -61,8 +61,8 @@ class AudioFeatureSnapshotAdmin(admin.ModelAdmin):
         'id',
         'createdAt',
         'updatedAt',
-        'track',
-        'synced_at',
+        'trackId',
+        'syncedAt',
     )
 
 
