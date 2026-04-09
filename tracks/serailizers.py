@@ -71,6 +71,12 @@ class TrackSerializer(HarmonicBaseSerializer):
         )
 
 
+class SpotifyImportSerializer(serializers.Serializer):
+    query = serializers.CharField(max_length=255)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=50, default=20)
+    market = serializers.CharField(required=False, max_length=2, allow_blank=False)
+
+
 class TrackMoodTagSerializer(HarmonicBaseSerializer):
 
     class Meta:
