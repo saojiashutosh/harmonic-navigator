@@ -23,8 +23,11 @@ class HarmonicBaseSerializer(serializers.ModelSerializer):
         view = self.context.get("view")
         request = self.context.get("request")
         action = getattr(view, "action", None)
+        request_user = getattr(request, "user", None)
         permission = bool(
-            request and getattr(request, "user", None) == getattr(instance, "id", None)
+            request
+            and getattr(request_user, "is_authenticated", False)
+            and request_user == instance
         )
         if action == "list":
             list_fields = getattr(self.Meta, "list_fields", self.Meta.fields)

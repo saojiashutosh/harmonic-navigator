@@ -147,8 +147,11 @@ class HarmonicTimeFilter(FilterSet):
             tz = pytz.utc
         today = timezone.now().astimezone(tz).date()
         start_of_month = today.replace(day=1)
-        end_of_month = (start_of_month.replace(
-            month=start_of_month.month + 1) - timedelta(days=1))
+        if start_of_month.month == 12:
+            next_month = start_of_month.replace(year=start_of_month.year + 1, month=1)
+        else:
+            next_month = start_of_month.replace(month=start_of_month.month + 1)
+        end_of_month = next_month - timedelta(days=1)
         start_of_month = tz.localize(datetime.combine(
             start_of_month, datetime.min.time()))
         end_of_month = tz.localize(datetime.combine(

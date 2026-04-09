@@ -1,34 +1,40 @@
 from rest_framework.viewsets import ModelViewSet
-from rest_framework.views import Response
 from rest_framework import status
-import django
+from rest_framework.response import Response
+from django.db.models.deletion import ProtectedError, RestrictedError
 
 
 class HarmonicBaseViewSet(ModelViewSet):
     # renderer_classes = AtomicJsonRenderer
 
-    # # TODO  write queryset
-    # def get_queryset(self):
-    #     """
-    #     1. filter inactive user
-    #     2. filter level zero user
-    #     3. Comments
-    #     """
-    #     if self.request.user_level == 0:
-    #         return self.serializer_class.Meta.model.objects.all()
-    #     if self.request.user_level == 5:
-    #         return self.serializer_class.Meta.model.objects.exclude(userId__user_level=0)
-    #     return self.serializer_class.Meta.model.objects.exclude(userId__is_active=False).exclude(userId__user_level=0)
+    def get_queryset(self):
+        """
+        Fall back to the serializer model when a concrete queryset is not set.
+        This keeps derived viewsets lightweight while still behaving like a
+        normal DRF ModelViewSet.
+        """
+        queryset = getattr(self, "queryset", None)
+        if queryset is not None:
+            if hasattr(queryset, "all"):
+                return queryset.all()
+            return queryset
+
+        serializer_class = self.get_serializer_class()
+        model = getattr(getattr(serializer_class, "Meta", None), "model", None)
+        if model is None:
+            raise AttributeError(
+                f"{self.__class__.__name__} must define `queryset` or a serializer with `Meta.model`."
+            )
+        return model.objects.all()
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         try:
             self.perform_destroy(instance)
-        except django.db.models.deletion.ProtectedError as e:
+        except ProtectedError as e:
             return Response(status=status.HTTP_423_LOCKED, data={'detail': str(e)})
-        except django.db.models.deletion.RestrictedError as e:
+        except RestrictedError as e:
             return Response(status=status.HTTP_423_LOCKED, data={'detail': str(e)})
-        # self.perform_destroy(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def perform_destroy(self, instance):
