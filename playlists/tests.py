@@ -98,3 +98,6 @@ class PlaylistGenerationTests(APITestCase):
         )
         self.assertEqual(playlist_tracks[0].trackId.title, "Deep Focus")
         self.assertGreaterEqual(playlist_tracks[0].relevanceScore, playlist_tracks[1].relevanceScore)
+        playlist_track_response = self.client.get("/playlists/playlist-tracks/")
+        self.assertEqual(playlist_track_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(playlist_track_response.data[0]["track"]["title"], "Deep Focus")

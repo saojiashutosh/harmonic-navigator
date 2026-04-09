@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from harmonic_navigator.serializers import HarmonicBaseSerializer
 from .models import Playlist, PlaylistTrack, SavedPlaylist
+from tracks.serailizers import TrackSerializer
 
 
 class PlaylistSerializer(HarmonicBaseSerializer):
@@ -24,6 +25,7 @@ class PlaylistSerializer(HarmonicBaseSerializer):
 
 
 class PlaylistTrackSerializer(HarmonicBaseSerializer):
+    track = TrackSerializer(source="trackId", read_only=True)
 
     class Meta:
         model = PlaylistTrack
@@ -38,6 +40,7 @@ class PlaylistTrackSerializer(HarmonicBaseSerializer):
             'relevanceScore',
             'playState',
             'playedAt',
+            'track',
         )
 
 
