@@ -1,3 +1,5 @@
+from rest_framework import serializers
+
 from harmonic_navigator.serializers import HarmonicBaseSerializer
 from .models import Playlist, PlaylistTrack, SavedPlaylist
 
@@ -51,3 +53,8 @@ class SavedPlaylistSerializer(HarmonicBaseSerializer):
             'playlistId',
             'name',
         )
+
+
+class GeneratePlaylistSerializer(serializers.Serializer):
+    moodSessionId = serializers.UUIDField()
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=50, default=20)
