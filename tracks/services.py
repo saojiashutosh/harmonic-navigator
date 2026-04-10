@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.db import transaction
 from django.utils import timezone
 
+from .excel_storage import sync_track_to_excel
 from .models import Artist, AudioFeatureSnapshot, Track
 from .spotify_client import search_tracks
 
@@ -75,6 +76,8 @@ def import_spotify_track(payload: dict) -> Track:
                 trackId=track,
                 snapshot=audio_features,
             )
+
+        transaction.on_commit(lambda: sync_track_to_excel(track))
 
     return track
 

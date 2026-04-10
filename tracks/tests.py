@@ -1,8 +1,13 @@
+import tempfile
+import zipfile
+from pathlib import Path
 from unittest.mock import patch
 
+from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from tracks.excel_storage import export_tracks_to_excel
 from tracks.models import Track
 from tracks.services import (
     derive_is_instrumental,
@@ -14,6 +19,15 @@ from users.models import Users
 
 
 class TrackServicesTests(APITestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.settings_override = override_settings(
+            SONG_EXCEL_BACKUP_PATH=str(Path(self.temp_dir.name) / "song_storage.xlsx")
+        )
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
+
     def test_derives_track_metadata_from_audio_features(self):
         self.assertEqual(
             derive_track_type({"instrumentalness": 0.82, "energy": 0.4, "acousticness": 0.2}),
@@ -57,6 +71,30 @@ class TrackServicesTests(APITestCase):
         self.assertEqual(track.primaryMood, "focused")
         self.assertEqual(track.keySignature, "C major")
 
+    def test_export_tracks_to_excel_writes_song_storage_workbook(self):
+        import_spotify_track(
+            {
+                "spotify_id": "track-456",
+                "title": "Archive Light",
+                "artist": {"spotify_id": "artist-456", "name": "Backup Band"},
+                "preview_url": None,
+                "external_url": "https://open.spotify.com/track/track-456",
+                "duration_ms": 123000,
+                "is_explicit": False,
+                "audio_features": {"energy": 0.5, "valence": 0.5},
+            }
+        )
+
+        workbook_path = export_tracks_to_excel()
+
+        self.assertTrue(workbook_path.exists())
+        with zipfile.ZipFile(workbook_path) as workbook:
+            sheet_xml = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+
+        self.assertIn("Archive Light", sheet_xml)
+        self.assertIn("Backup Band", sheet_xml)
+        self.assertIn("track-456", sheet_xml)
+
 
 class TrackImportApiTests(APITestCase):
     @classmethod
@@ -71,6 +109,13 @@ class TrackImportApiTests(APITestCase):
         )
 
     def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.settings_override = override_settings(
+            SONG_EXCEL_BACKUP_PATH=str(Path(self.temp_dir.name) / "song_storage.xlsx")
+        )
+        self.settings_override.enable()
+        self.addCleanup(self.settings_override.disable)
         self.client.force_authenticate(user=self.user)
 
     @patch("tracks.views.import_spotify_search_results")
