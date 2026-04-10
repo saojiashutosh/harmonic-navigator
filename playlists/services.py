@@ -26,13 +26,16 @@ def build_playlist_for_session(
     }
     social_setting = answer_map.get("social_setting")
     music_preference = answer_map.get("music_preference")
+    music_language = answer_map.get("music_language")
+    music_style = answer_map.get("music_style")
+    preferred_artist = answer_map.get("preferred_artist")
     type_weights = _resolve_type_weights(
         user_id=session.userId_id,
         mood_label=inference.moodLabel,
         music_preference=music_preference,
     )
 
-    candidate_tracks = Track.objects.filter(isActive=True)
+    candidate_tracks = Track.objects.select_related("artistId").filter(isActive=True)
     if social_setting in {"kids", "meeting"}:
         candidate_tracks = candidate_tracks.filter(isExplicit=False)
 
@@ -44,6 +47,9 @@ def build_playlist_for_session(
             mood_label=inference.moodLabel,
             type_weights=type_weights,
             music_preference=music_preference,
+            music_language=music_language,
+            music_style=music_style,
+            preferred_artist=preferred_artist,
         )
         scored_tracks.append((track, relevance_score))
 
@@ -99,7 +105,17 @@ def _resolve_type_weights(*, user_id, mood_label: str, music_preference: str | N
     return default_weights
 
 
-def _score_track(*, track: Track, user_id, mood_label: str, type_weights: dict[str, float], music_preference: str | None) -> float:
+def _score_track(
+    *,
+    track: Track,
+    user_id,
+    mood_label: str,
+    type_weights: dict[str, float],
+    music_preference: str | None,
+    music_language: str | None,
+    music_style: str | None,
+    preferred_artist: str | None,
+) -> float:
     score = 0.0
 
     if track.primaryMood == mood_label:
@@ -122,6 +138,12 @@ def _score_track(*, track: Track, user_id, mood_label: str, type_weights: dict[s
         score += 0.10
     if music_preference == "background" and track.type == Track.TypeChoices.AMBIENT:
         score += 0.12
+    score += _taste_score(
+        track=track,
+        music_language=music_language,
+        music_style=music_style,
+        preferred_artist=preferred_artist,
+    )
 
     feedback_score = TrackMoodScore.objects.filter(
         userId_id=user_id,
@@ -132,6 +154,58 @@ def _score_track(*, track: Track, user_id, mood_label: str, type_weights: dict[s
         score += feedback_score * 0.20
 
     return round(min(score, 1.0), 4)
+
+
+def _taste_score(
+    *,
+    track: Track,
+    music_language: str | None,
+    music_style: str | None,
+    preferred_artist: str | None,
+) -> float:
+    score = 0.0
+    language = _normalise(track.language)
+    genre = _normalise(track.genre)
+    region = _normalise(track.region)
+    raga_name = _normalise(track.ragaName)
+    classical_form = _normalise(track.classicalForm)
+    artist_name = _normalise(getattr(track.artistId, "name", ""))
+
+    requested_language = _normalise(music_language)
+    if requested_language and requested_language != "no_preference":
+        if requested_language == "instrumental" and track.isInstrumental:
+            score += 0.18
+        elif requested_language == language:
+            score += 0.18
+        elif requested_language == "hindi" and genre == "bollywood":
+            score += 0.10
+
+    requested_style = _normalise(music_style)
+    if requested_style and requested_style != "no_preference":
+        if requested_style == genre:
+            score += 0.20
+        elif requested_style == "bollywood" and (language == "hindi" or region == "india"):
+            score += 0.14
+        elif requested_style == "hollywood" and language == "english":
+            score += 0.14
+        elif requested_style == "classical" and classical_form:
+            score += 0.18
+        elif requested_style == "raga" and (raga_name or genre == "raga"):
+            score += 0.20
+
+    artist_query = _normalise(preferred_artist)
+    if artist_query and artist_query not in {"any", "none", "no_preference"}:
+        if artist_query in artist_name:
+            score += 0.22
+
+    if track.artistPopularity is not None:
+        score += min(track.artistPopularity / 100, 1.0) * 0.05
+
+    return score
+
+
+def _normalise(value: str | None) -> str:
+    return (value or "").strip().lower().replace(" ", "_")
 
 
 def _selection_reason(*, track: Track, mood_label: str, music_preference: str | None) -> str:
