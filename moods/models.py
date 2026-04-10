@@ -61,6 +61,7 @@ class Question(HarmonicBaseModel):
 
     class InputTypeChoices(models.TextChoices):
         SELECT = "select", "Select"
+        TEXT = "text", "Text"
 
     key = models.CharField(
         max_length=64,

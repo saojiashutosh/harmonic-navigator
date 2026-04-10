@@ -87,6 +87,47 @@ QUESTION_DEFINITIONS = [
             {"rawValue": "surprise", "label": "Surprise me"},
         ],
     },
+    {
+        "key": "music_language",
+        "text": "Which language or music culture do you want right now?",
+        "category": "preference",
+        "inputType": "select",
+        "order": 7,
+        "options": [
+            {"rawValue": "no_preference", "label": "No preference"},
+            {"rawValue": "hindi", "label": "Hindi / Bollywood"},
+            {"rawValue": "english", "label": "English / Hollywood"},
+            {"rawValue": "marathi", "label": "Marathi"},
+            {"rawValue": "punjabi", "label": "Punjabi"},
+            {"rawValue": "instrumental", "label": "Instrumental only"},
+        ],
+    },
+    {
+        "key": "music_style",
+        "text": "What style should the playlist lean toward?",
+        "category": "preference",
+        "inputType": "select",
+        "order": 8,
+        "options": [
+            {"rawValue": "no_preference", "label": "No preference"},
+            {"rawValue": "bollywood", "label": "Bollywood"},
+            {"rawValue": "hollywood", "label": "Hollywood / English pop"},
+            {"rawValue": "pop", "label": "Pop"},
+            {"rawValue": "indie", "label": "Indie"},
+            {"rawValue": "classical", "label": "Indian classical"},
+            {"rawValue": "raga", "label": "Classical raga"},
+            {"rawValue": "lofi", "label": "Lo-fi"},
+            {"rawValue": "devotional", "label": "Devotional"},
+        ],
+    },
+    {
+        "key": "preferred_artist",
+        "text": "Any artist you want to hear? Leave blank if not.",
+        "category": "preference",
+        "inputType": "text",
+        "order": 9,
+        "options": [],
+    },
 ]
 
 QUESTION_WEIGHTS = {
@@ -363,6 +404,20 @@ OPTION_WEIGHTS = {
     "no_lyrics": 1.0,
     "background": 1.0,
     "surprise": 1.0,
+    "no_preference": 1.0,
+    "hindi": 1.0,
+    "english": 1.0,
+    "marathi": 1.0,
+    "punjabi": 1.0,
+    "instrumental": 1.0,
+    "bollywood": 1.0,
+    "hollywood": 1.0,
+    "pop": 1.0,
+    "indie": 1.0,
+    "classical": 1.0,
+    "raga": 1.0,
+    "lofi": 1.0,
+    "devotional": 1.0,
 }
 
 MUSIC_PREFERENCE_OVERRIDES = {

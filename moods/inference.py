@@ -14,6 +14,8 @@ def normalise_answer_value(raw_value: str, question: Question) -> float:
                 f"Unknown option '{raw_value}' for question '{question.key}'. Valid options: {valid}"
             )
         return OPTION_WEIGHTS[raw_value]
+    if question.inputType == Question.InputTypeChoices.TEXT:
+        return 1.0 if raw_value.strip() else 0.0
 
     raise ValueError(f"Unsupported input type '{question.inputType}'.")
 
