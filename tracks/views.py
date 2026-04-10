@@ -48,6 +48,7 @@ class TrackView(HarmonicBaseViewSet):
         'durationMs',
         'energy',
         'valence',
+        'artistPopularity',
     )
 
     @action(detail=False, methods=["post"], url_path="import-spotify")
@@ -60,6 +61,18 @@ class TrackView(HarmonicBaseViewSet):
                 query=serializer.validated_data["query"],
                 limit=serializer.validated_data["limit"],
                 market=serializer.validated_data.get("market"),
+                metadata={
+                    key: serializer.validated_data.get(key)
+                    for key in (
+                        "language",
+                        "genre",
+                        "region",
+                        "artistPopularity",
+                        "ragaName",
+                        "classicalForm",
+                    )
+                    if serializer.validated_data.get(key) is not None
+                },
             )
         except SpotifyConfigurationError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)

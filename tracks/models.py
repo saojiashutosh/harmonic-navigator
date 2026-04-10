@@ -174,6 +174,48 @@ class Track(HarmonicBaseModel):
         db_column="primary_mood",
         null=True,
     )
+    language = models.CharField(
+        max_length=32,
+        verbose_name=_("language"),
+        db_column="language",
+        null=True,
+        blank=True,
+    )
+    genre = models.CharField(
+        max_length=64,
+        verbose_name=_("genre"),
+        db_column="genre",
+        null=True,
+        blank=True,
+    )
+    region = models.CharField(
+        max_length=64,
+        verbose_name=_("region"),
+        db_column="region",
+        null=True,
+        blank=True,
+    )
+    artistPopularity = models.PositiveSmallIntegerField(
+        verbose_name=_("artist popularity"),
+        db_column="artist_popularity",
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    ragaName = models.CharField(
+        max_length=64,
+        verbose_name=_("raga name"),
+        db_column="raga_name",
+        null=True,
+        blank=True,
+    )
+    classicalForm = models.CharField(
+        max_length=64,
+        verbose_name=_("classical form"),
+        db_column="classical_form",
+        null=True,
+        blank=True,
+    )
     isInstrumental = models.BooleanField(
         verbose_name=_("isInstrumental"),
         db_column="is_instrumental",

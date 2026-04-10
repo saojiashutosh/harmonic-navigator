@@ -61,7 +61,15 @@ class TrackServicesTests(APITestCase):
                     "instrumentalness": 0.76,
                     "loudness": -11.4,
                 },
-            }
+            },
+            metadata={
+                "language": "hindi",
+                "genre": "bollywood",
+                "region": "india",
+                "artistPopularity": 72,
+                "ragaName": "Yaman",
+                "classicalForm": "khayal",
+            },
         )
 
         self.assertEqual(track.title, "Focus Beam")
@@ -70,6 +78,9 @@ class TrackServicesTests(APITestCase):
         self.assertEqual(track.type, Track.TypeChoices.INSTRUMENTAL)
         self.assertEqual(track.primaryMood, "focused")
         self.assertEqual(track.keySignature, "C major")
+        self.assertEqual(track.language, "hindi")
+        self.assertEqual(track.genre, "bollywood")
+        self.assertEqual(track.ragaName, "Yaman")
 
     def test_export_tracks_to_excel_writes_song_storage_workbook(self):
         import_spotify_track(
@@ -136,7 +147,7 @@ class TrackImportApiTests(APITestCase):
 
         response = self.client.post(
             "/tracks/tracks/import-spotify/",
-            {"query": "night drive", "limit": 1},
+            {"query": "night drive", "limit": 1, "language": "english", "genre": "pop"},
             format="json",
         )
 
@@ -147,3 +158,5 @@ class TrackImportApiTests(APITestCase):
             response.data["tracks"][0]["externalUrl"],
             "https://open.spotify.com/track/track-999",
         )
+        mock_import.assert_called_once()
+        self.assertEqual(mock_import.call_args.kwargs["metadata"], {"language": "english", "genre": "pop"})

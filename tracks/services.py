@@ -32,14 +32,20 @@ KEY_SIGNATURES = {
 }
 
 
-def import_spotify_search_results(query: str, limit: int = 20, market: str | None = None) -> list[Track]:
+def import_spotify_search_results(
+    query: str,
+    limit: int = 20,
+    market: str | None = None,
+    metadata: dict | None = None,
+) -> list[Track]:
     payloads = search_tracks(query=query, limit=limit, market=market)
-    return [import_spotify_track(payload) for payload in payloads]
+    return [import_spotify_track(payload, metadata=metadata) for payload in payloads]
 
 
-def import_spotify_track(payload: dict) -> Track:
+def import_spotify_track(payload: dict, metadata: dict | None = None) -> Track:
     artist_payload = payload["artist"]
     audio_features = payload.get("audio_features") or {}
+    metadata = metadata or {}
 
     with transaction.atomic():
         artist = _upsert_artist(artist_payload)
@@ -62,6 +68,12 @@ def import_spotify_track(payload: dict) -> Track:
             "isInstrumental": derive_is_instrumental(audio_features),
             "type": derive_track_type(audio_features),
             "primaryMood": derive_primary_mood(audio_features),
+            "language": metadata.get("language"),
+            "genre": metadata.get("genre"),
+            "region": metadata.get("region"),
+            "artistPopularity": metadata.get("artistPopularity"),
+            "ragaName": metadata.get("ragaName"),
+            "classicalForm": metadata.get("classicalForm"),
             "isActive": True,
             "featuresSyncedAt": timezone.now() if audio_features else None,
         }

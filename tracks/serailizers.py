@@ -64,6 +64,12 @@ class TrackSerializer(HarmonicBaseSerializer):
             'instrumentalness',
             'loudness',
             'primaryMood',
+            'language',
+            'genre',
+            'region',
+            'artistPopularity',
+            'ragaName',
+            'classicalForm',
             'isInstrumental',
             'isExplicit',
             'isActive',
@@ -75,6 +81,12 @@ class SpotifyImportSerializer(serializers.Serializer):
     query = serializers.CharField(max_length=255)
     limit = serializers.IntegerField(required=False, min_value=1, max_value=50, default=20)
     market = serializers.CharField(required=False, max_length=2, allow_blank=False)
+    language = serializers.CharField(required=False, max_length=32, allow_blank=False)
+    genre = serializers.CharField(required=False, max_length=64, allow_blank=False)
+    region = serializers.CharField(required=False, max_length=64, allow_blank=False)
+    artistPopularity = serializers.IntegerField(required=False, min_value=0, max_value=100)
+    ragaName = serializers.CharField(required=False, max_length=64, allow_blank=False)
+    classicalForm = serializers.CharField(required=False, max_length=64, allow_blank=False)
 
 
 class TrackMoodTagSerializer(HarmonicBaseSerializer):
