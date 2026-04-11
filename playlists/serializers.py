@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 from harmonic_navigator.serializers import HarmonicBaseSerializer
 from .models import Playlist, PlaylistTrack, SavedPlaylist
-from tracks.serailizers import TrackSerializer
+from tracks.serializers import TrackSerializer
 
 
 class PlaylistSerializer(HarmonicBaseSerializer):
