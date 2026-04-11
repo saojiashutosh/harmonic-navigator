@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from .excel_storage import sync_track_to_excel
 from .models import Artist, AudioFeatureSnapshot, Track
-from .spotify_client import search_tracks
+from .spotify_client import get_track, search_tracks
 
 
 MOOD_SIGNATURES = {
@@ -42,6 +42,15 @@ def import_spotify_search_results(
     return [import_spotify_track(payload, metadata=metadata) for payload in payloads]
 
 
+def import_spotify_track_url(
+    track_url_or_id: str,
+    market: str | None = None,
+    metadata: dict | None = None,
+) -> Track:
+    payload = get_track(track_url_or_id=track_url_or_id, market=market)
+    return import_spotify_track(payload, metadata=metadata)
+
+
 def import_spotify_track(payload: dict, metadata: dict | None = None) -> Track:
     artist_payload = payload["artist"]
     audio_features = payload.get("audio_features") or {}
@@ -67,7 +76,7 @@ def import_spotify_track(payload: dict, metadata: dict | None = None) -> Track:
             "isExplicit": payload.get("is_explicit", False),
             "isInstrumental": derive_is_instrumental(audio_features),
             "type": derive_track_type(audio_features),
-            "primaryMood": derive_primary_mood(audio_features),
+            "primaryMood": metadata.get("primaryMood") or derive_primary_mood(audio_features),
             "language": metadata.get("language"),
             "genre": metadata.get("genre"),
             "region": metadata.get("region"),

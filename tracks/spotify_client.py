@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+from urllib.parse import urlparse
 
 class SpotifyConfigurationError(RuntimeError):
     """Raised when Spotify credentials are missing."""
@@ -55,7 +57,47 @@ def search_tracks(query: str, limit: int = 20, market: str | None = None) -> lis
     ]
 
 
-def _build_client() -> Spotify:
+def get_track(track_url_or_id: str, market: str | None = None) -> dict:
+    client = _build_client()
+    track_id = extract_spotify_track_id(track_url_or_id)
+    market_code = market or os.getenv("SPOTIFY_MARKET", "IN")
+
+    try:
+        from spotipy.exceptions import SpotifyException
+
+        item = client.track(track_id, market=market_code)
+    except SpotifyException as exc:
+        raise SpotifyImportError(f"Spotify track request failed: {exc}") from exc
+
+    audio_features = {}
+    try:
+        from spotipy.exceptions import SpotifyException
+
+        audio_features = client.audio_features([track_id])[0] or {}
+    except SpotifyException:
+        audio_features = {}
+
+    return _normalise_track_payload(item, audio_features)
+
+
+def extract_spotify_track_id(track_url_or_id: str) -> str:
+    value = track_url_or_id.strip()
+    if not value:
+        raise SpotifyImportError("Spotify track URL or ID is required.")
+
+    parsed = urlparse(value)
+    if parsed.netloc:
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 2 and parts[0] == "track":
+            return parts[1]
+
+    if re.fullmatch(r"[A-Za-z0-9]{22}", value):
+        return value
+
+    raise SpotifyImportError("Invalid Spotify track URL or ID.")
+
+
+def _build_client() -> "Spotify":
     try:
         from spotipy import Spotify
         from spotipy.oauth2 import SpotifyClientCredentials

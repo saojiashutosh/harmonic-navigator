@@ -14,7 +14,9 @@ from tracks.services import (
     derive_primary_mood,
     derive_track_type,
     import_spotify_track,
+    import_spotify_track_url,
 )
+from tracks.spotify_client import extract_spotify_track_id
 from users.models import Users
 
 
@@ -81,6 +83,44 @@ class TrackServicesTests(APITestCase):
         self.assertEqual(track.language, "hindi")
         self.assertEqual(track.genre, "bollywood")
         self.assertEqual(track.ragaName, "Yaman")
+
+    def test_extract_spotify_track_id_from_url(self):
+        self.assertEqual(
+            extract_spotify_track_id("https://open.spotify.com/track/1C3FDG90jTcNt74EL5wDpN?si=a9fea0a073844294"),
+            "1C3FDG90jTcNt74EL5wDpN",
+        )
+        self.assertEqual(
+            extract_spotify_track_id("1C3FDG90jTcNt74EL5wDpN"),
+            "1C3FDG90jTcNt74EL5wDpN",
+        )
+
+    @patch("tracks.services.get_track")
+    def test_import_spotify_track_url_uses_metadata_override(self, mock_get_track):
+        mock_get_track.return_value = {
+            "spotify_id": "1C3FDG90jTcNt74EL5wDpN",
+            "title": "Perfect Sad Calm Lofi",
+            "artist": {"spotify_id": "artist-perfect", "name": "Mood Artist"},
+            "preview_url": None,
+            "external_url": "https://open.spotify.com/track/1C3FDG90jTcNt74EL5wDpN",
+            "duration_ms": 200000,
+            "is_explicit": False,
+            "audio_features": {},
+        }
+
+        track = import_spotify_track_url(
+            "https://open.spotify.com/track/1C3FDG90jTcNt74EL5wDpN?si=a9fea0a073844294",
+            metadata={
+                "language": "hindi",
+                "genre": "lofi",
+                "region": "india",
+                "primaryMood": "calm",
+            },
+        )
+
+        self.assertEqual(track.spotifyId, "1C3FDG90jTcNt74EL5wDpN")
+        self.assertEqual(track.primaryMood, "calm")
+        self.assertEqual(track.language, "hindi")
+        self.assertEqual(track.genre, "lofi")
 
     def test_export_tracks_to_excel_writes_song_storage_workbook(self):
         import_spotify_track(
@@ -160,3 +200,38 @@ class TrackImportApiTests(APITestCase):
         )
         mock_import.assert_called_once()
         self.assertEqual(mock_import.call_args.kwargs["metadata"], {"language": "english", "genre": "pop"})
+
+    @patch("tracks.views.import_spotify_track_url")
+    def test_import_spotify_track_endpoint_returns_imported_track(self, mock_import):
+        track = import_spotify_track(
+            {
+                "spotify_id": "1C3FDG90jTcNt74EL5wDpN",
+                "title": "Perfect Sad Calm Lofi",
+                "artist": {"spotify_id": "artist-perfect-api", "name": "Mood Artist"},
+                "preview_url": None,
+                "external_url": "https://open.spotify.com/track/1C3FDG90jTcNt74EL5wDpN",
+                "duration_ms": 200000,
+                "is_explicit": False,
+                "audio_features": {},
+            },
+            metadata={"language": "hindi", "genre": "lofi", "primaryMood": "calm"},
+        )
+        mock_import.return_value = track
+
+        response = self.client.post(
+            "/tracks/tracks/import-spotify-track/",
+            {
+                "track": "https://open.spotify.com/track/1C3FDG90jTcNt74EL5wDpN?si=a9fea0a073844294",
+                "language": "hindi",
+                "genre": "lofi",
+                "region": "india",
+                "primaryMood": "calm",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["spotifyId"], "1C3FDG90jTcNt74EL5wDpN")
+        self.assertEqual(response.data["language"], "hindi")
+        self.assertEqual(response.data["genre"], "lofi")
+        self.assertEqual(response.data["primaryMood"], "calm")
