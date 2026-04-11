@@ -13,7 +13,7 @@ class MoodTagView(HarmonicBaseViewSet):
     queryset = models.MoodTag.objects.all()
     serializer_class = serializers.MoodTagSerializer
     filterset_class = filters.MoodTagFilter
-    # permission_classes = ()
+    permission_classes = ()
     search_fields = ()
     ordering_fields = (
         'createdAt',
@@ -26,7 +26,7 @@ class ArtistView(HarmonicBaseViewSet):
     queryset = models.Artist.objects.all()
     serializer_class = serializers.ArtistSerializer
     filterset_class = filters.ArtistFilter
-    # permission_classes = ()
+    permission_classes = ()
     search_fields = ()
     ordering_fields = (
         'createdAt',
@@ -39,7 +39,7 @@ class TrackView(HarmonicBaseViewSet):
     queryset = models.Track.objects.all()
     serializer_class = serializers.TrackSerializer
     filterset_class = filters.TrackFilter
-    # permission_classes = ()
+    permission_classes = ()
     search_fields = ()
     ordering_fields = (
         'createdAt',
@@ -90,7 +90,8 @@ class TrackView(HarmonicBaseViewSet):
 
     @action(detail=False, methods=["post"], url_path="import-spotify-track")
     def import_spotify_track(self, request):
-        serializer = serializers.SpotifyTrackImportSerializer(data=request.data)
+        serializer = serializers.SpotifyTrackImportSerializer(
+            data=request.data)
         serializer.is_valid(raise_exception=True)
 
         try:
@@ -123,7 +124,7 @@ class TrackMoodTagView(HarmonicBaseViewSet):
     queryset = models.TrackMoodTag.objects.all()
     serializer_class = serializers.TrackMoodTagSerializer
     filterset_class = filters.TrackMoodTagFilter
-    # permission_classes = ()
+    permission_classes = ()
     search_fields = ()
     ordering_fields = (
         'createdAt',
@@ -136,7 +137,7 @@ class AudioFeatureSnapshotView(HarmonicBaseViewSet):
     queryset = models.AudioFeatureSnapshot.objects.all()
     serializer_class = serializers.AudioFeatureSnapshotSerializer
     filterset_class = filters.AudioFeatureSnapshotFilter
-    # permission_classes = ()
+    permission_classes = ()
     search_fields = ()
     ordering_fields = (
         'createdAt',

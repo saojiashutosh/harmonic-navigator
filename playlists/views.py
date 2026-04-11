@@ -1,6 +1,5 @@
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from harmonic_navigator.views import HarmonicBaseViewSet
@@ -14,7 +13,7 @@ class PlaylistViewSet(HarmonicBaseViewSet):
     queryset = models.Playlist.objects.all()
     serializer_class = serializers.PlaylistSerializer
     filterset_class = filters.PlaylistFilter
-    permission_classes = (IsAuthenticated,)
+    permission_classes = ()
     search_fields = ()
     ordering_fields = (
         'createdAt',
@@ -23,8 +22,7 @@ class PlaylistViewSet(HarmonicBaseViewSet):
         'trackCount',
     )
 
-    def get_queryset(self):
-        return super().get_queryset().filter(userId=self.request.user)
+
 
     @action(detail=False, methods=["post"], url_path="generate")
     def generate(self, request):
@@ -34,7 +32,6 @@ class PlaylistViewSet(HarmonicBaseViewSet):
         try:
             session = MoodSession.objects.get(
                 id=serializer.validated_data["moodSessionId"],
-                userId=request.user,
             )
         except MoodSession.DoesNotExist:
             return Response({"detail": "Mood session not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -57,7 +54,7 @@ class PlaylistTrackViewSet(HarmonicBaseViewSet):
     queryset = models.PlaylistTrack.objects.all()
     serializer_class = serializers.PlaylistTrackSerializer
     filterset_class = filters.PlaylistTrackFilter
-    permission_classes = (IsAuthenticated,)
+    permission_classes = ()
     search_fields = ()
     ordering_fields = (
         'createdAt',
@@ -68,7 +65,6 @@ class PlaylistTrackViewSet(HarmonicBaseViewSet):
     def get_queryset(self):
         return (
             super().get_queryset()
-            .filter(playlistId__userId=self.request.user)
             .select_related("playlistId", "trackId", "trackId__artistId")
         )
 
@@ -77,15 +73,14 @@ class SavedPlaylistViewSet(HarmonicBaseViewSet):
     queryset = models.SavedPlaylist.objects.all()
     serializer_class = serializers.SavedPlaylistSerializer
     filterset_class = filters.SavedPlaylistFilter
-    permission_classes = (IsAuthenticated,)
+    permission_classes = ()
     search_fields = ()
     ordering_fields = (
         'createdAt',
         'updatedAt',
     )
 
-    def get_queryset(self):
-        return super().get_queryset().filter(userId=self.request.user)
+
 
 
 # Create your views here.
