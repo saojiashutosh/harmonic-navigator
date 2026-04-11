@@ -1,3 +1,4 @@
+import os
 import re
 import json
 from django.db import connection
@@ -85,6 +86,8 @@ class QueryCountMiddleware:
     def __call__(self, request):
         response = self.get_response(request)
         query_count = len(connection.queries)
-        with open('logs/query_count.txt', 'a+') as f:
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        with open(os.path.join(log_dir, 'query_count.txt'), 'a+') as f:
             f.write(f"{request.path} {request.method} {query_count} \n")
         return response

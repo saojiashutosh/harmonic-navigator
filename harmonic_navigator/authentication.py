@@ -1,5 +1,17 @@
-from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework_simplejwt.exceptions import AuthenticationFailed
+try:
+    from rest_framework_simplejwt.authentication import JWTAuthentication
+    from rest_framework_simplejwt.exceptions import AuthenticationFailed
+except ModuleNotFoundError:
+    from rest_framework.authentication import BaseAuthentication
+
+    class JWTAuthentication(BaseAuthentication):
+        """Placeholder when simplejwt is not installed."""
+        def authenticate(self, request):
+            return None
+
+    class AuthenticationFailed(Exception):
+        pass
+
 from .exceptions import UserDeleted
 
 
