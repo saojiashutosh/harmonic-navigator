@@ -3,9 +3,12 @@ from rest_framework import status
 from rest_framework.response import Response
 from django.db.models.deletion import ProtectedError, RestrictedError
 
+from harmonic_navigator.pagination import HarmonicPagination
+
 
 class HarmonicBaseViewSet(ModelViewSet):
     # renderer_classes = AtomicJsonRenderer
+    pagination_class = HarmonicPagination
 
     def get_queryset(self):
         """
