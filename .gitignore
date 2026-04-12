@@ -9,3 +9,4 @@ __pycache__/
 *.log
 song_storage.xlsx
 **/migrations/
+staticfiles/
