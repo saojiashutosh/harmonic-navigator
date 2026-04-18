@@ -195,22 +195,6 @@ const QuestionPage = ({ onRestart }) => {
         </div>
       </div>
 
-      {/* Header */}
-      <header className="q-header">
-        <div className="q-header-logo" onClick={onRestart}>
-          <img src="/logo.png" alt="Harmonic" className="logo-img" />
-          <span className="logo-text">Harmonic</span>
-        </div>
-        <nav className="q-header-nav">
-          <a href="#">Discover</a>
-          <a href="#">About</a>
-        </nav>
-        <button className="restart-btn" onClick={onRestart}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
-          RESTART
-        </button>
-      </header>
-
       {/* Main Content */}
       <main className="question-main">
         {/* Progress */}
