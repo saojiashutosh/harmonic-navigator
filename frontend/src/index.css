@@ -86,6 +86,44 @@ a {
 @keyframes orbFloat2 { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(30px, -35px) scale(1.12); } }
 @keyframes orbFloat3 { 0%, 100% { transform: translateX(-50%) scale(1); opacity: 0.06; } 50% { transform: translateX(-50%) translate(20px, -25px) scale(1.2); opacity: 0.15; } }
 
+/* ── Soothing Waves ── */
+.waves-container {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 25vh;
+  min-height: 150px;
+  max-height: 300px;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.4;
+}
+
+.wave-svg {
+  position: absolute;
+  width: 200%;
+  height: 100%;
+  bottom: 0;
+  left: 0;
+}
+
+.wave-path {
+  animation: waveFlow 20s cubic-bezier(0.36, 0.45, 0.63, 0.53) infinite;
+  transform: translate3d(0, 0, 0);
+}
+
+.wave-1 { fill: rgba(129, 140, 248, 0.08); animation-duration: 25s; opacity: 0.7; }
+.wave-2 { fill: rgba(45, 212, 191, 0.06); animation-duration: 35s; animation-delay: -5s; opacity: 0.5; }
+.wave-3 { fill: rgba(192, 132, 252, 0.05); animation-duration: 45s; animation-delay: -10s; opacity: 0.4; }
+
+@keyframes waveFlow {
+  0% { transform: translateX(0) translateZ(0) scaleY(1); }
+  50% { transform: translateX(-25%) translateZ(0) scaleY(0.7); }
+  100% { transform: translateX(-50%) translateZ(0) scaleY(1); }
+}
+
 /* ── Shared Header & Logo ── */
 .header {
   display: flex !important;

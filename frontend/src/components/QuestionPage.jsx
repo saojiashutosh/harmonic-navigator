@@ -184,6 +184,15 @@ const QuestionPage = ({ onRestart }) => {
         <div className="orb orb-1"></div>
         <div className="orb orb-2"></div>
         <div className="orb orb-3"></div>
+
+        {/* Animated Waves */}
+        <div className="waves-container">
+          <svg className="wave-svg" viewBox="0 0 1000 100" preserveAspectRatio="none">
+            <path className="wave-path wave-1" d="M0,50 C150,110 350,0 500,50 C650,100 850,0 1000,50 L1000,100 L0,100 Z" />
+            <path className="wave-path wave-2" d="M0,50 C150,0 350,110 500,50 C650,0 850,110 1000,50 L1000,100 L0,100 Z" />
+            <path className="wave-path wave-3" d="M0,50 C150,100 350,0 500,50 C650,100 850,0 1000,50 L1000,100 L0,100 Z" />
+          </svg>
+        </div>
       </div>
 
       {/* Header */}
