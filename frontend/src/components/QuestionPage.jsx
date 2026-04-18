@@ -65,6 +65,14 @@ const OPTION_DATA = {
     lofi: { emoji: "🌊", title: "Lo-fi chill", desc: "Beats to relax, study, or zone out." },
     devotional: { emoji: "🙏", title: "Sacred sounds", desc: "Spiritual and devotional music." },
   },
+  playlist_goal: {
+    focus: { emoji: "ðŸŽ¯", title: "Deep focus", desc: "Keep me locked in and productive." },
+    relax: { emoji: "ðŸ§˜", title: "Slow it down", desc: "Help me unwind and breathe." },
+    uplift: { emoji: "âœ¨", title: "Lift my mood", desc: "I want something brighter and lighter." },
+    escape: { emoji: "â˜ï¸", title: "Let me drift", desc: "Pull me into the music for a while." },
+    party: { emoji: "ðŸŽ‰", title: "Bring the vibe", desc: "Make it lively, fun, and energetic." },
+    sleep: { emoji: "ðŸ˜´", title: "Ready to rest", desc: "Soft, sleepy, and peaceful." },
+  },
 };
 
 const getOptionData = (questionKey, rawValue, fallbackLabel) => {
@@ -228,6 +236,18 @@ const QuestionPage = ({ onRestart, onComplete }) => {
         <div className="loader-content">
           <div className="pulse-ring"></div>
           <h2>Tuning your frequency...</h2>
+        </div>
+      </div>
+    );
+  }
+
+  if (isSubmitting) {
+    return (
+      <div className="question-page loading-state">
+        <div className="ambient-bg"><div className="orb orb-1"></div><div className="orb orb-2"></div></div>
+        <div className="loader-content">
+          <div className="pulse-ring"></div>
+          <h2>Generating your playlist...</h2>
         </div>
       </div>
     );
