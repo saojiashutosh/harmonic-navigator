@@ -143,6 +143,33 @@ a {
   position: relative;
 }
 
+.scrollable-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 1;
+  
+  /* Smooth scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(129, 140, 248, 0.2) transparent;
+}
+
+.scrollable-content.fixed-frame {
+  overflow: hidden;
+}
+
+.scrollable-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollable-content::-webkit-scrollbar-thumb {
+  background: rgba(129, 140, 248, 0.2);
+  border-radius: 10px;
+}
+
 .header-logo {
   display: flex !important;
   align-items: center;
