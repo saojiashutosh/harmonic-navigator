@@ -1,8 +1,146 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './QuestionPage.css';
 
+// Creative frontend labels mapped by question key → rawValue
+const CREATIVE_LABELS = {
+  energy_level: {
+    drained: "🔋 Running on fumes",
+    low: "🌙 Barely flickering",
+    mid: "⚡ Coasting along",
+    good: "✨ Feeling alive",
+    charged: "🔥 Overflowing energy",
+  },
+  emotional_tone: {
+    happy: "☀️ Sunshine vibes",
+    calm: "🧘 Inner peace mode",
+    sad: "🌧️ Cloudy skies",
+    tense: "⚡ Wired & restless",
+    flat: "😶 Radio silence",
+    excited: "🎉 Can't sit still",
+  },
+  mental_state: {
+    sharp: "🎯 Laser focused",
+    scattered: "🌪️ Mind tornado",
+    drifting: "☁️ Head in the clouds",
+    motivated: "🚀 Ready for launch",
+    blank: "📻 White noise",
+  },
+  activity: {
+    working: "💼 Grind mode",
+    exercising: "🏃 Breaking a sweat",
+    relaxing: "🛋️ Couch potato life",
+    commuting: "🚗 On the move",
+    social: "🥂 Party mode",
+    sleeping: "😴 Lights out soon",
+  },
+  social_setting: {
+    alone: "🎧 Solo session",
+    others: "👥 Crew's here",
+    kids: "👶 Little ears around",
+    meeting: "💻 Work zone",
+  },
+  music_preference: {
+    lyrics: "📝 Words that hit deep",
+    no_lyrics: "🎵 Pure instrumentals",
+    background: "🔈 Whisper quiet",
+    surprise: "🎲 Dealer's choice",
+  },
+  music_language: {
+    no_preference: "🌍 Anything goes",
+    hindi: "🇮🇳 Bollywood beats",
+    english: "🎤 English vibes",
+    marathi: "🪘 Marathi magic",
+    punjabi: "💃 Punjabi energy",
+    instrumental: "🎻 No words needed",
+  },
+  music_style: {
+    no_preference: "🎶 Surprise me",
+    bollywood: "🎬 Filmy feels",
+    hollywood: "🌟 Western pop",
+    pop: "🎤 Pop anthems",
+    indie: "🎸 Indie & raw",
+    classical: "🪷 Classical soul",
+    raga: "🎵 Raga rhythms",
+    lofi: "🌊 Lo-fi chill",
+    devotional: "🙏 Sacred sounds",
+  },
+};
+
+const getCreativeLabel = (questionKey, rawValue, fallbackLabel) => {
+  return CREATIVE_LABELS[questionKey]?.[rawValue] || fallbackLabel;
+};
+
 const QuestionPage = ({ onRestart }) => {
-  const [selectedCard, setSelectedCard] = useState('electric');
+  const [questions, setQuestions] = useState([]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch('http://localhost:8000/moods/questions/')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.results) {
+          setQuestions(data.results);
+        } else if (Array.isArray(data)) {
+          setQuestions(data);
+        } else {
+          setQuestions([]);
+        }
+        setIsLoading(false);
+      })
+      .catch(err => {
+        console.error('Failed to load questions:', err);
+        setError('Failed to load questions.');
+        setIsLoading(false);
+      });
+  }, []);
+
+  const handleOptionSelect = (value) => {
+    const currentQ = questions[currentQuestionIndex];
+    setAnswers(prev => ({ ...prev, [currentQ.key]: value }));
+  };
+
+  const handleNext = () => {
+    if (currentQuestionIndex < questions.length - 1) {
+      setCurrentQuestionIndex(prev => prev + 1);
+    } else {
+      alert("All questions answered! Payload:\n" + JSON.stringify(answers, null, 2));
+    }
+  };
+
+  const handlePrevious = () => {
+    if (currentQuestionIndex > 0) {
+      setCurrentQuestionIndex(prev => prev - 1);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="question-page" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'white' }}>
+        <h2 style={{fontFamily: 'var(--font-headline)'}}>Loading the Navigator...</h2>
+      </div>
+    );
+  }
+
+  if (error || questions.length === 0) {
+    return (
+      <div className="question-page" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'white', flexDirection: 'column' }}>
+        <h2 style={{fontFamily: 'var(--font-headline)', marginBottom: '1rem'}}>{error || "No questions found."}</h2>
+        <button className="btn btn-outlined" onClick={onRestart}>RETURN TO START</button>
+      </div>
+    );
+  }
+
+  const currentQ = questions[currentQuestionIndex];
+  const stepNumber = String(currentQuestionIndex + 1).padStart(2, '0');
+  const totalSteps = String(questions.length).padStart(2, '0');
+  const progressPercent = ((currentQuestionIndex + 1) / questions.length) * 100;
+
+  // Determine grid column count based on option count
+  const optionCount = currentQ.options?.length || 0;
+  const colCount = optionCount <= 4 ? 2 : 3;
 
   return (
     <div className="question-page">
@@ -21,135 +159,77 @@ const QuestionPage = ({ onRestart }) => {
         {/* Progress */}
         <div className="progress-section">
           <div className="progress-header">
-            <span>STEP 03 / 05</span>
-            <span>CURRENT ENERGY</span>
+            <span>STEP {stepNumber} / {totalSteps}</span>
+            <span>{currentQ.category?.replace('_', ' ').toUpperCase() || 'QUESTION'}</span>
           </div>
           <div className="progress-bar">
-            <div className="progress-fill"></div>
+            <div className="progress-fill" style={{ width: `${progressPercent}%`, transition: 'width 0.3s ease' }}></div>
           </div>
         </div>
 
         {/* Question Title */}
         <div className="question-subtitle">THE DIGITAL CURATOR</div>
         <h1 className="question-title">
-          How would you describe <br />
-          your <span className="italic text-tertiary" style={{marginLeft: '8px'}}>current energy?</span>
+          {currentQ.text}
         </h1>
 
         {/* Option Cards */}
-        <div className="energy-cards">
-          {/* Card 1 */}
-          <div 
-            className={`energy-card ${selectedCard === 'quiet' ? 'active' : ''}`}
-            onClick={() => setSelectedCard('quiet')}
-          >
-            <div className="card-icon-container">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 12h4l2-3 4 6 4-6 2 3h4" />
-                <path d="M4 8h2l2-2 4 4 4-4 2 2h2" />
-                <path d="M4 16h2l2 2 4-4 4 4 2-2h2" />
-              </svg>
-            </div>
-            <h3 className="card-title-text">A quiet hum</h3>
-            <p className="card-desc-text">Soft, steady, and introspective. A low-frequency vibration.</p>
-          </div>
+        <div
+          className="energy-cards"
+          style={{ gridTemplateColumns: `repeat(${colCount}, 1fr)` }}
+        >
+          {currentQ.inputType === 'select' && currentQ.options.map((opt, idx) => {
+            const isSelected = answers[currentQ.key] === opt.rawValue;
+            const displayLabel = getCreativeLabel(currentQ.key, opt.rawValue, opt.label);
+            return (
+              <div 
+                key={idx}
+                className={`energy-card ${isSelected ? 'active' : ''}`}
+                onClick={() => handleOptionSelect(opt.rawValue)}
+              >
+                <h3 className="card-title-text">{displayLabel}</h3>
+              </div>
+            );
+          })}
 
-          {/* Card 2 */}
-          <div 
-            className={`energy-card ${selectedCard === 'electric' ? 'active' : ''}`}
-            onClick={() => setSelectedCard('electric')}
-          >
-            <div className="card-icon-container">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-              </svg>
+          {currentQ.inputType === 'text' && (
+            <div className="text-input-container" style={{ gridColumn: '1 / -1' }}>
+               <input 
+                 type="text" 
+                 className="mood-text-input"
+                 placeholder="Type an artist name... or leave blank"
+                 value={answers[currentQ.key] || ''}
+                 onChange={(e) => handleOptionSelect(e.target.value)}
+                 autoFocus
+               />
             </div>
-            <h3 className="card-title-text">Electric and bright</h3>
-            <p className="card-desc-text">High-voltage clarity. Sharp, focused, and ready to move.</p>
-          </div>
-
-          {/* Card 3 */}
-          <div 
-            className={`energy-card ${selectedCard === 'slow' ? 'active' : ''}`}
-            onClick={() => setSelectedCard('slow')}
-          >
-            <div className="card-icon-container">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="7" y="4" width="10" height="16" rx="2" ry="2" />
-                <path d="M9 8h6" />
-                <path d="M9 12h6" />
-                <path d="M9 16h6" />
-                <path d="M4 12h3" />
-                <path d="M17 12h3" />
-              </svg>
-            </div>
-            <h3 className="card-title-text">A slow, deep rhythm</h3>
-            <p className="card-desc-text">Grounded and heavy. Moving with the weight of water.</p>
-          </div>
+          )}
         </div>
 
         {/* Bottom Nav */}
         <div className="bottom-nav">
-          <button className="nav-btn">
+          <button 
+            className="nav-btn" 
+            onClick={handlePrevious} 
+            style={{ visibility: currentQuestionIndex === 0 ? 'hidden' : 'visible' }}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg> 
             PREVIOUS
           </button>
+          
           <div className="pagination-dots">
-            <span className="dot"></span>
-            <span className="dot"></span>
-            <span className="dot active"></span>
-            <span className="dot"></span>
-            <span className="dot"></span>
+            {questions.map((q, idx) => (
+               <span key={q.id} className={`dot ${idx === currentQuestionIndex ? 'active' : ''}`} />
+            ))}
           </div>
-          <button className="nav-btn">
-            NEXT QUESTION 
+
+          <button className="nav-btn" onClick={handleNext}>
+            {currentQuestionIndex === questions.length - 1 ? 'FINISH ' : 'NEXT QUESTION '} 
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
           </button>
         </div>
       </main>
 
-      {/* Footer Player */}
-      <footer className="music-player-footer">
-        <div className="player-content">
-          <div className="now-playing">
-            <div className="track-img"></div>
-            <div className="track-info">
-              <span className="previewing-label">PREVIEWING</span>
-              <span className="track-name">Ambient Flow IV</span>
-            </div>
-          </div>
-          
-          <div className="player-controls">
-            <span className="control-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>
-            </span>
-            <span className="control-icon play-button">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            </span>
-            <span className="control-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
-            </span>
-          </div>
-
-          <div className="volume-control">
-            <span className="control-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
-            </span>
-            <div className="volume-bar">
-              <div className="volume-fill"></div>
-            </div>
-          </div>
-        </div>
-
-        <div className="app-footer">
-          <span>&copy; 2026 HARMONIC NAVIGATOR</span>
-          <div className="footer-nav">
-            <a href="#">PRIVACY</a>
-            <a href="#">TERMS</a>
-            <a href="#">SHARE MOOD</a>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 };
