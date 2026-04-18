@@ -121,11 +121,26 @@ QUESTION_DEFINITIONS = [
         ],
     },
     {
+        "key": "playlist_goal",
+        "text": "What should this playlist help you do?",
+        "category": "preference",
+        "inputType": "select",
+        "order": 9,
+        "options": [
+            {"rawValue": "focus", "label": "Focus and concentrate"},
+            {"rawValue": "relax", "label": "Relax and slow down"},
+            {"rawValue": "uplift", "label": "Lift my mood"},
+            {"rawValue": "escape", "label": "Get lost in the music"},
+            {"rawValue": "party", "label": "Bring energy and vibe"},
+            {"rawValue": "sleep", "label": "Rest or fall asleep"},
+        ],
+    },
+    {
         "key": "preferred_artist",
         "text": "Any artist you want to hear? Leave blank if not.",
         "category": "preference",
         "inputType": "text",
-        "order": 9,
+        "order": 10,
         "options": [],
     },
 ]
@@ -371,6 +386,54 @@ QUESTION_WEIGHTS = {
         "melancholic": 0.00,
         "anxious": 0.00,
     },
+    "playlist_goal_focus": {
+        "focused": 0.95,
+        "calm": 0.15,
+        "energized": 0.05,
+        "anxious": -0.25,
+        "melancholic": -0.10,
+        "celebratory": -0.25,
+    },
+    "playlist_goal_relax": {
+        "calm": 0.95,
+        "melancholic": 0.20,
+        "focused": 0.05,
+        "energized": -0.35,
+        "celebratory": -0.35,
+        "anxious": -0.30,
+    },
+    "playlist_goal_uplift": {
+        "energized": 0.60,
+        "celebratory": 0.55,
+        "calm": 0.05,
+        "focused": 0.10,
+        "melancholic": -0.40,
+        "anxious": -0.15,
+    },
+    "playlist_goal_escape": {
+        "melancholic": 0.55,
+        "calm": 0.40,
+        "focused": -0.05,
+        "energized": -0.20,
+        "celebratory": -0.20,
+        "anxious": -0.05,
+    },
+    "playlist_goal_party": {
+        "celebratory": 0.90,
+        "energized": 0.60,
+        "focused": -0.20,
+        "calm": -0.35,
+        "melancholic": -0.50,
+        "anxious": -0.10,
+    },
+    "playlist_goal_sleep": {
+        "calm": 1.00,
+        "melancholic": 0.25,
+        "focused": -0.20,
+        "energized": -0.60,
+        "celebratory": -0.60,
+        "anxious": -0.35,
+    },
 }
 
 OPTION_WEIGHTS = {
@@ -418,6 +481,12 @@ OPTION_WEIGHTS = {
     "raga": 1.0,
     "lofi": 1.0,
     "devotional": 1.0,
+    "focus": 1.0,
+    "relax": 1.0,
+    "uplift": 1.0,
+    "escape": 1.0,
+    "party": 1.0,
+    "sleep": 1.0,
 }
 
 MUSIC_PREFERENCE_OVERRIDES = {

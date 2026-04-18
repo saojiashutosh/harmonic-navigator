@@ -5,6 +5,8 @@ from math import exp
 from moods.constants import OPTION_WEIGHTS, QUESTION_WEIGHTS
 from moods.models import MoodInference, Question
 
+LOGIT_SCALE = 2.4
+
 
 def normalise_answer_value(raw_value: str, question: Question) -> float:
     if question.inputType == Question.InputTypeChoices.SELECT:
@@ -35,7 +37,7 @@ def infer_mood_from_responses(
         for mood_label, weight in QUESTION_WEIGHTS.get(weight_key, {}).items():
             scores[mood_label] += weight * value
 
-    exp_scores = {mood: exp(score) for mood, score in scores.items()}
+    exp_scores = {mood: exp(score * LOGIT_SCALE) for mood, score in scores.items()}
     total = sum(exp_scores.values())
     probabilities = {
         mood: round(score / total, 4)

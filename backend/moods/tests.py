@@ -103,6 +103,7 @@ class MoodFlowTests(APITestCase):
             ("activity", "working"),
             ("social_setting", "alone"),
             ("music_preference", "lyrics"),
+            ("playlist_goal", "focus"),
         ]
 
         responses = []
@@ -120,3 +121,4 @@ class MoodFlowTests(APITestCase):
         self.assertEqual(mood_label, "focused")
         self.assertEqual(confidence, raw_scores["focused"])
         self.assertGreater(raw_scores["focused"], raw_scores["energized"])
+        self.assertGreater(raw_scores["focused"], 0.5)
