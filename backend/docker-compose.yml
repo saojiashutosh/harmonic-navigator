@@ -1,11 +1,27 @@
 services:
   web:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
-    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "Running database migrations..."
+        python manage.py migrate --noinput
+        echo "Syncing mood questions..."
+        python manage.py sync_mood_questions --no-color
+        echo "Checking whether track bootstrap is needed..."
+        if python manage.py shell -c "from tracks.models import Track; raise SystemExit(0 if Track.objects.exists() else 1)"; then
+          echo "Tracks already exist, skipping Excel import."
+        else
+          echo "No tracks found, importing from Excel workbook..."
+          python manage.py import_tracks_from_excel --no-color
+        fi
+        exec python manage.py runserver 0.0.0.0:8000
     env_file:
-      - ./backend/.env
+      - ./.env
     environment:
       DJANGO_SETTINGS_MODULE: core.settings.development
       DJANGO_DEBUG: "true"
@@ -16,17 +32,17 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       DB_HOST: db
       DB_PORT: 5432
+      IMPORT_TRACKS_ON_STARTUP: ${IMPORT_TRACKS_ON_STARTUP:-auto}
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
+      - .:/app
     depends_on:
       db:
         condition: service_healthy
 
   db:
     image: postgres:14-alpine
-    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
