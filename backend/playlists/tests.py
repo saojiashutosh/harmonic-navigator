@@ -34,6 +34,7 @@ class PlaylistGenerationTests(APITestCase):
             ]
         )
         artist = Artist.objects.create(name="Artist One", spotifyId="artist-1")
+        preferred_artist = Artist.objects.create(name="Teju Beats", spotifyId="artist-2")
         Track.objects.create(
             title="Deep Focus",
             artistId=artist,
@@ -74,6 +75,22 @@ class PlaylistGenerationTests(APITestCase):
             isExplicit=False,
             isActive=True,
         )
+        Track.objects.create(
+            title="Teju Hindi Focus",
+            artistId=preferred_artist,
+            type=Track.TypeChoices.SONG,
+            source=Track.SourceChoices.MANUAL,
+            energy=0.52,
+            valence=0.44,
+            primaryMood="focused",
+            language="hindi",
+            genre="bollywood",
+            region="india",
+            artistPopularity=95,
+            isInstrumental=False,
+            isExplicit=False,
+            isActive=True,
+        )
 
     def setUp(self):
         self.client.force_authenticate(user=self.user)
@@ -91,6 +108,8 @@ class PlaylistGenerationTests(APITestCase):
                 Answer(moodSessionId=session, questionId=question_map["music_preference"], rawValue="lyrics", value=1.0),
                 Answer(moodSessionId=session, questionId=question_map["music_language"], rawValue="hindi", value=1.0),
                 Answer(moodSessionId=session, questionId=question_map["music_style"], rawValue="bollywood", value=1.0),
+                Answer(moodSessionId=session, questionId=question_map["playlist_goal"], rawValue="focus", value=1.0),
+                Answer(moodSessionId=session, questionId=question_map["preferred_artist"], rawValue="Teju", value=1.0),
             ]
         )
         MoodInference.objects.create(
@@ -109,17 +128,24 @@ class PlaylistGenerationTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         playlist = Playlist.objects.get(id=response.data["id"])
         self.assertEqual(playlist.moodLabel, "focused")
-        self.assertEqual(playlist.trackCount, 3)
+        self.assertEqual(playlist.trackCount, 4)
 
         playlist_tracks = list(
             PlaylistTrack.objects.filter(playlistId=playlist).order_by("position")
         )
-        self.assertEqual(playlist_tracks[0].trackId.title, "Hindi Focus Flow")
+        self.assertEqual(playlist_tracks[0].trackId.title, "Teju Hindi Focus")
         self.assertGreaterEqual(playlist_tracks[0].relevanceScore, playlist_tracks[1].relevanceScore)
-        playlist_track_response = self.client.get("/playlists/playlist-tracks/")
+        playlist_track_response = self.client.get(f"/playlists/playlist-tracks/?playlistId={playlist.id}")
         self.assertEqual(playlist_track_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(playlist_track_response.data[0]["track"]["title"], "Hindi Focus Flow")
-        self.assertEqual(playlist_track_response.data[0]["track"]["language"], "hindi")
+        playlist_track_payload = (
+            playlist_track_response.data
+            if isinstance(playlist_track_response.data, list)
+            else playlist_track_response.data["results"]
+        )
+        payload_titles = [row["track"]["title"] for row in playlist_track_payload]
+        payload_languages = {row["track"]["title"]: row["track"]["language"] for row in playlist_track_payload}
+        self.assertIn("Teju Hindi Focus", payload_titles)
+        self.assertEqual(payload_languages["Teju Hindi Focus"], "hindi")
 
     def test_generate_playlist_allows_guest_sessions(self):
         self.client.force_authenticate(user=None)
