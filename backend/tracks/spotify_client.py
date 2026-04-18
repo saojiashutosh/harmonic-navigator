@@ -37,13 +37,13 @@ def search_tracks(query: str, limit: int = 20, market: str | None = None) -> lis
         raise SpotifyImportError(f"Spotify request failed: {exc}") from exc
 
     feature_rows = []
-    if spotify_ids:
-        try:
-            from spotipy.exceptions import SpotifyException
-
-            feature_rows = client.audio_features(spotify_ids) or []
-        except SpotifyException:
-            feature_rows = []
+    # Disabled due to Spotify API restriction (403 errors)
+    # if spotify_ids:
+    #     try:
+    #         from spotipy.exceptions import SpotifyException
+    #         feature_rows = client.audio_features(spotify_ids) or []
+    #     except SpotifyException:
+    #         feature_rows = []
 
     feature_map = {
         feature["id"]: feature
@@ -70,12 +70,12 @@ def get_track(track_url_or_id: str, market: str | None = None) -> dict:
         raise SpotifyImportError(f"Spotify track request failed: {exc}") from exc
 
     audio_features = {}
-    try:
-        from spotipy.exceptions import SpotifyException
-
-        audio_features = client.audio_features([track_id])[0] or {}
-    except SpotifyException:
-        audio_features = {}
+    # Disabled due to Spotify API restriction (403 errors)
+    # try:
+    #     from spotipy.exceptions import SpotifyException
+    #     audio_features = client.audio_features([track_id])[0] or {}
+    # except SpotifyException:
+    #     audio_features = {}
 
     return _normalise_track_payload(item, audio_features)
 
