@@ -12,6 +12,9 @@ from moods.models import Answer, MoodInference, MoodSession, Question
 
 
 def start_session(user) -> MoodSession:
+    # Handle Django AnonymousUser by setting to None for guest sessions
+    if user and user.is_anonymous:
+        user = None
     return MoodSession.objects.create(userId=user)
 
 

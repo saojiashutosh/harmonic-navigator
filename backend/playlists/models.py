@@ -18,6 +18,7 @@ class Playlist(HarmonicBaseModel):
         related_name="playlists",
         db_column="user_id",
         verbose_name=_("user"),
+        null=True,
     )
 
     moodInferenceId = models.ForeignKey(

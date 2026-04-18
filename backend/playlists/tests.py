@@ -120,3 +120,36 @@ class PlaylistGenerationTests(APITestCase):
         self.assertEqual(playlist_track_response.status_code, status.HTTP_200_OK)
         self.assertEqual(playlist_track_response.data[0]["track"]["title"], "Hindi Focus Flow")
         self.assertEqual(playlist_track_response.data[0]["track"]["language"], "hindi")
+
+    def test_generate_playlist_allows_guest_sessions(self):
+        self.client.force_authenticate(user=None)
+        session = MoodSession.objects.create(userId=None)
+        question_map = {question.key: question for question in Question.objects.all()}
+        Answer.objects.bulk_create(
+            [
+                Answer(moodSessionId=session, questionId=question_map["energy_level"], rawValue="low", value=0.6),
+                Answer(moodSessionId=session, questionId=question_map["emotional_tone"], rawValue="calm", value=1.0),
+                Answer(moodSessionId=session, questionId=question_map["mental_state"], rawValue="drifting", value=0.8),
+                Answer(moodSessionId=session, questionId=question_map["activity"], rawValue="relaxing", value=1.0),
+                Answer(moodSessionId=session, questionId=question_map["social_setting"], rawValue="alone", value=1.0),
+                Answer(moodSessionId=session, questionId=question_map["music_preference"], rawValue="no_lyrics", value=1.0),
+            ]
+        )
+        MoodInference.objects.create(
+            moodSessionId=session,
+            moodLabel="calm",
+            confidence=0.72,
+            rawScores={"calm": 0.72},
+        )
+
+        response = self.client.post(
+            "/playlists/playlists/generate/",
+            {"moodSessionId": str(session.id), "limit": 3},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        playlist = Playlist.objects.get(id=response.data["id"])
+        self.assertIsNone(playlist.userId)
+        self.assertEqual(playlist.moodLabel, "calm")
+        self.assertLessEqual(playlist.trackCount, 3)

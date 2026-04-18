@@ -12,6 +12,7 @@ class MoodSession(HarmonicBaseModel):
         related_name="mood_sessions",
         verbose_name=_("User"),
         db_column="userId",
+        null=True,
     )
 
     startedAt = models.DateTimeField(

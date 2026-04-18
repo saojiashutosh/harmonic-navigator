@@ -13,7 +13,7 @@ class MoodSessionViewSet(HarmonicBaseViewSet):
     queryset = models.MoodSession.objects.all()
     serializer_class = serializers.MoodSessionSerializer
     filterset_class = filters.MoodSessionFilter
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (AllowAny,)
     search_fields = ()
     ordering_fields = ("createdAt", "updatedAt")
 
@@ -36,7 +36,7 @@ class MoodSessionViewSet(HarmonicBaseViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if session.userId != request.user:
+        if session.userId and session.userId != request.user:
             return Response(
                 {"detail": "Not found."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -65,7 +65,11 @@ class MoodSessionViewSet(HarmonicBaseViewSet):
         )
 
     def get_queryset(self):
-        return super().get_queryset().filter(userId=self.request.user)
+        user = self.request.user
+        if user.is_anonymous:
+            # Allow seeing guest sessions created by anonymous users
+            return super().get_queryset().filter(userId__isnull=True)
+        return super().get_queryset().filter(userId=user)
 
 
 class QuestionViewSet(HarmonicBaseViewSet):
