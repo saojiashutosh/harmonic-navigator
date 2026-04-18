@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import zipfile
+from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -37,6 +38,12 @@ HEADERS = (
     "instrumentalness",
     "loudness",
     "primary_mood",
+    "language",
+    "genre",
+    "region",
+    "artist_popularity",
+    "raga_name",
+    "classical_form",
     "is_instrumental",
     "is_explicit",
     "is_active",
@@ -56,7 +63,7 @@ def export_tracks_to_excel(tracks: QuerySet[Track] | None = None, path: str | os
     workbook_path = Path(path or get_song_excel_backup_path())
     workbook_path.parent.mkdir(parents=True, exist_ok=True)
 
-    rows = [_track_to_row(track) for track in _get_tracks(tracks)]
+    rows = [_row_from_data(row_data) for row_data in _dedupe_track_rows(_get_tracks(tracks))]
     _write_workbook(workbook_path, rows)
     return workbook_path
 
@@ -70,37 +77,139 @@ def _get_tracks(tracks: QuerySet[Track] | None) -> QuerySet[Track]:
     return queryset.select_related("artistId").order_by("createdAt", "id")
 
 
-def _track_to_row(track: Track) -> tuple:
+def _track_to_row_data(track: Track) -> dict[str, object]:
     artist = track.artistId
+    return {
+        "id": track.id,
+        "title": track.title,
+        "artist_name": artist.name if artist else None,
+        "artist_spotify_id": artist.spotifyId if artist else None,
+        "type": track.type,
+        "source": track.source,
+        "spotify_id": track.spotifyId,
+        "fma_id": track.fmaId,
+        "preview_url": track.previewUrl,
+        "external_url": track.externalUrl,
+        "tempo_bpm": track.tempoBpm,
+        "duration_ms": track.durationMs,
+        "duration_minutes": track.duration_minutes,
+        "key_signature": track.keySignature,
+        "energy": track.energy,
+        "valence": track.valence,
+        "acousticness": track.acousticness,
+        "instrumentalness": track.instrumentalness,
+        "loudness": track.loudness,
+        "primary_mood": track.primaryMood,
+        "language": track.language,
+        "genre": track.genre,
+        "region": track.region,
+        "artist_popularity": track.artistPopularity,
+        "raga_name": track.ragaName,
+        "classical_form": track.classicalForm,
+        "is_instrumental": track.isInstrumental,
+        "is_explicit": track.isExplicit,
+        "is_active": track.isActive,
+        "features_synced_at": track.featuresSyncedAt,
+        "created_at": track.createdAt,
+        "updated_at": track.updatedAt,
+        "excel_synced_at": timezone.now(),
+    }
+
+
+def _row_from_data(row_data: dict[str, object]) -> tuple:
+    return tuple(row_data[header] for header in HEADERS)
+
+
+def _dedupe_track_rows(tracks: QuerySet[Track]) -> list[dict[str, object]]:
+    rows_by_key: OrderedDict[tuple, dict[str, object]] = OrderedDict()
+
+    for track in tracks:
+        row_data = _track_to_row_data(track)
+        key = _track_identity(row_data)
+        existing = rows_by_key.get(key)
+        if existing is None:
+            rows_by_key[key] = row_data
+            continue
+        rows_by_key[key] = _merge_row_data(existing, row_data)
+
+    return list(rows_by_key.values())
+
+
+def _track_identity(row_data: dict[str, object]) -> tuple:
+    if row_data["spotify_id"]:
+        return ("spotify_id", row_data["spotify_id"])
+    if row_data["fma_id"]:
+        return ("fma_id", row_data["fma_id"])
+    if row_data["external_url"]:
+        return ("external_url", row_data["external_url"])
     return (
-        track.id,
-        track.title,
-        artist.name if artist else None,
-        artist.spotifyId if artist else None,
-        track.type,
-        track.source,
-        track.spotifyId,
-        track.fmaId,
-        track.previewUrl,
-        track.externalUrl,
-        track.tempoBpm,
-        track.durationMs,
-        track.duration_minutes,
-        track.keySignature,
-        track.energy,
-        track.valence,
-        track.acousticness,
-        track.instrumentalness,
-        track.loudness,
-        track.primaryMood,
-        track.isInstrumental,
-        track.isExplicit,
-        track.isActive,
-        track.featuresSyncedAt,
-        track.createdAt,
-        track.updatedAt,
-        timezone.now(),
+        "fallback",
+        _normalise_identity_value(row_data["title"]),
+        _normalise_identity_value(row_data["artist_spotify_id"] or row_data["artist_name"]),
+        row_data["duration_ms"],
+        _normalise_identity_value(row_data["source"]),
     )
+
+
+def _merge_row_data(existing: dict[str, object], incoming: dict[str, object]) -> dict[str, object]:
+    primary = existing
+    secondary = incoming
+
+    if _row_completeness(incoming) > _row_completeness(existing):
+        primary = incoming.copy()
+        secondary = existing
+    else:
+        primary = existing.copy()
+
+    for header in HEADERS:
+        if header in {"excel_synced_at", "duration_minutes"}:
+            continue
+        if _is_missing(primary.get(header)) and not _is_missing(secondary.get(header)):
+            primary[header] = secondary[header]
+
+    primary["created_at"] = _min_value(existing.get("created_at"), incoming.get("created_at"))
+    primary["updated_at"] = _max_value(existing.get("updated_at"), incoming.get("updated_at"))
+    primary["features_synced_at"] = _max_value(existing.get("features_synced_at"), incoming.get("features_synced_at"))
+    primary["duration_minutes"] = _duration_minutes(primary.get("duration_ms"))
+    primary["excel_synced_at"] = timezone.now()
+    return primary
+
+
+def _row_completeness(row_data: dict[str, object]) -> int:
+    return sum(0 if _is_missing(value) else 1 for value in row_data.values())
+
+
+def _is_missing(value: object) -> bool:
+    return value is None or value == ""
+
+
+def _normalise_identity_value(value: object) -> object:
+    if value is None:
+        return None
+    return str(value).strip().casefold()
+
+
+def _min_value(left: object, right: object) -> object:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left if left <= right else right
+
+
+def _max_value(left: object, right: object) -> object:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left if left >= right else right
+
+
+def _duration_minutes(duration_ms: object) -> str | None:
+    if not duration_ms:
+        return None
+    seconds = int(duration_ms) // 1000
+    return f"{seconds // 60}:{seconds % 60:02d}"
 
 
 def _write_workbook(path: Path, rows: list[tuple]) -> None:
@@ -141,7 +250,7 @@ def _worksheet_xml(rows: list[tuple]) -> str:
         'activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
         '<sheetFormatPr defaultRowHeight="15"/>'
         f"<sheetData>{worksheet_rows}</sheetData>"
-        '<autoFilter ref="A1:AA1"/>'
+        f'<autoFilter ref="A1:{_column_name(len(HEADERS))}1"/>'
         "</worksheet>"
     )
 

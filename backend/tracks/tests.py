@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from tracks.excel_storage import export_tracks_to_excel
-from tracks.models import Track
+from tracks.models import Artist, Track
 from tracks.services import (
     derive_is_instrumental,
     derive_primary_mood,
@@ -133,7 +133,15 @@ class TrackServicesTests(APITestCase):
                 "duration_ms": 123000,
                 "is_explicit": False,
                 "audio_features": {"energy": 0.5, "valence": 0.5},
-            }
+            },
+            metadata={
+                "language": "hindi",
+                "genre": "ghazal",
+                "region": "india",
+                "artistPopularity": 84,
+                "ragaName": "Bhairavi",
+                "classicalForm": "thumri",
+            },
         )
 
         workbook_path = export_tracks_to_excel()
@@ -145,6 +153,50 @@ class TrackServicesTests(APITestCase):
         self.assertIn("Archive Light", sheet_xml)
         self.assertIn("Backup Band", sheet_xml)
         self.assertIn("track-456", sheet_xml)
+        self.assertIn("hindi", sheet_xml)
+        self.assertIn("ghazal", sheet_xml)
+        self.assertIn("india", sheet_xml)
+        self.assertIn("84", sheet_xml)
+        self.assertIn("Bhairavi", sheet_xml)
+        self.assertIn("thumri", sheet_xml)
+
+    def test_export_tracks_to_excel_deduplicates_matching_songs_and_keeps_richer_metadata(self):
+        artist = Artist.objects.create(name="Duplicate Artist", spotifyId="artist-dup")
+        Track.objects.create(
+            title="Merged Song",
+            artistId=artist,
+            source=Track.SourceChoices.SPOTIFY,
+            spotifyId="dup-spotify-id",
+            durationMs=240000,
+            primaryMood="calm",
+        )
+        Track.objects.create(
+            title="Merged Song",
+            artistId=artist,
+            source=Track.SourceChoices.SPOTIFY,
+            spotifyId="dup-spotify-id",
+            durationMs=240000,
+            language="hindi",
+            genre="fusion",
+            region="india",
+            artistPopularity=91,
+            ragaName="Yaman",
+            classicalForm="bandish",
+        )
+
+        workbook_path = export_tracks_to_excel()
+
+        with zipfile.ZipFile(workbook_path) as workbook:
+            sheet_xml = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+
+        self.assertEqual(sheet_xml.count("dup-spotify-id"), 1)
+        self.assertIn("calm", sheet_xml)
+        self.assertIn("hindi", sheet_xml)
+        self.assertIn("fusion", sheet_xml)
+        self.assertIn("india", sheet_xml)
+        self.assertIn("91", sheet_xml)
+        self.assertIn("Yaman", sheet_xml)
+        self.assertIn("bandish", sheet_xml)
 
 
 class TrackImportApiTests(APITestCase):
