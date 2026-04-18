@@ -10,24 +10,34 @@ function App() {
   }
 
   return (
-    <div className="home-layout">
+    <div className="home-layout relative">
+       {/* Ambient background orbs */}
+      <div className="ambient-bg">
+        <div className="orb orb-1"></div>
+        <div className="orb orb-2"></div>
+        <div className="orb orb-3"></div>
+      </div>
+
       {/* Header */}
       <header className="header container">
-        <div className="header-logo" style={{ cursor: 'pointer' }} onClick={() => setCurrentView('home')}>Harmonic Navigator</div>
+        <div className="header-logo" onClick={() => setCurrentView('home')}>
+          <img src="/logo.png" alt="Harmonic" className="logo-img" />
+          <span className="logo-text">Harmonic</span>
+        </div>
         <nav className="header-nav">
           <a href="#" className="active">Discover</a>
           <a href="#">About</a>
         </nav>
-        <button className="btn btn-outlined">RESTART</button>
+        <button className="btn btn-outlined" onClick={() => setCurrentView('question')}>START NOW</button>
       </header>
 
       {/* Hero Section */}
-      <section className="section hero-section container text-center">
+      <section className="section hero-section container text-center relative z-1">
         <span className="subtitle">THE DIGITAL CURATOR</span>
         <h1 className="hero-title">
           Discover the <br />
           Sound of Your <br />
-          <span className="italic text-primary">Current State</span>
+          <span className="highlight-text">current state</span>
         </h1>
         <p className="hero-description">
           An ethereal bridge between your inner resonance and the infinite world<br />
@@ -108,12 +118,12 @@ function App() {
       </section>
 
       {/* Footer Section */}
-      <footer className="footer-section text-center">
+      <footer className="footer-section text-center relative z-1">
         <h2 className="footer-title">
           Your sound is waiting to <br />
-          be <span className="italic text-primary">heard.</span>
+          be <span className="highlight-text">heard.</span>
         </h2>
-        <button className="btn btn-outlined btn-large flex-center mx-auto" onClick={() => setCurrentView('question')}>
+        <button className="btn btn-primary btn-large flex-center mx-auto" onClick={() => setCurrentView('question')}>
           ENTER THE NAVIGATOR <span className="arrow ml-2">→</span>
         </button>
         <p className="footer-subtitle italic">Free your mind. Let the frequencies flow.</p>
