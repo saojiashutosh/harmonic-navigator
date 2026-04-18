@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import './QuestionPage.css';
+import { fetchQuestions, createMoodSession, submitAnswers, generatePlaylist, fetchPlaylistTracks } from '../api';
 
 // Full option data: emoji icon, catchy title, brief description
 const OPTION_DATA = {
@@ -89,39 +90,73 @@ const renderQuestionText = (text) => {
   );
 };
 
-const QuestionPage = ({ onRestart }) => {
+const QuestionPage = ({ onRestart, onComplete }) => {
   const [questions, setQuestions] = useState([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState({});
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [pulsingCard, setPulsingCard] = useState(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const finishStartedRef = useRef(false);
 
   useEffect(() => {
-    fetch('http://localhost:8000/moods/questions/')
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.results) {
-          setQuestions(data.results);
-        } else if (Array.isArray(data)) {
-          setQuestions(data);
-        } else {
-          setQuestions([]);
-        }
+    let isMounted = true;
+    const init = async () => {
+      const [questionsResult, sessionResult] = await Promise.allSettled([
+        fetchQuestions(),
+        createMoodSession(),
+      ]);
+
+      if (!isMounted) {
+        return;
+      }
+
+      if (questionsResult.status === 'fulfilled') {
+        setQuestions(questionsResult.value);
+        setError(null);
+      } else {
+        console.error('Question init failed:', questionsResult.reason);
+        setError('Could not load questions. Please try again.');
+      }
+
+      if (sessionResult.status === 'fulfilled') {
+        setSessionId(sessionResult.value.id);
+      } else {
+        console.error('Session init failed:', sessionResult.reason);
+      }
+
+      setIsLoading(false);
+    };
+
+    init().catch((err) => {
+      console.error('Init failed:', err);
+      if (isMounted) {
+        setError('Could not connect to the server. Please try again.');
         setIsLoading(false);
-      })
-      .catch(err => {
-        console.error('Failed to load questions:', err);
-        setError('Failed to load questions.');
-        setIsLoading(false);
-      });
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  const ensureSessionId = async () => {
+    if (sessionId) {
+      return sessionId;
+    }
+
+    const session = await createMoodSession();
+    setSessionId(session.id);
+    return session.id;
+  };
 
   const handleOptionSelect = (value) => {
     const currentQ = questions[currentQuestionIndex];
     setAnswers(prev => ({ ...prev, [currentQ.key]: value }));
-    // Trigger pulse animation
     setPulsingCard(value);
     setTimeout(() => setPulsingCard(null), 400);
   };
@@ -134,11 +169,49 @@ const QuestionPage = ({ onRestart }) => {
     }, 250);
   };
 
+  const handleFinish = async () => {
+    if (finishStartedRef.current) return;
+    finishStartedRef.current = true;
+    setIsSubmitting(true);
+    setError(null);
+    let completed = false;
+    try {
+      const activeSessionId = await ensureSessionId();
+
+      // Step 1: Submit answers
+      const inference = await submitAnswers(activeSessionId, answers);
+
+      // Step 2: Generate playlist
+      const playlist = await generatePlaylist(inference.moodSessionId, 10);
+
+      // Step 3: Fetch the actual tracks
+      const playlistTracks = await fetchPlaylistTracks(playlist.id);
+
+      // Pass everything up to App
+      onComplete({
+        moodLabel: inference.moodLabel,
+        confidence: inference.confidence,
+        rawScores: inference.rawScores,
+        playlist,
+        tracks: playlistTracks.map(pt => pt.track),
+      });
+      completed = true;
+    } catch (err) {
+      console.error('Finish failed:', err);
+      setError('Something went wrong while generating your playlist. Please try again.');
+    } finally {
+      if (!completed) {
+        finishStartedRef.current = false;
+        setIsSubmitting(false);
+      }
+    }
+  };
+
   const handleNext = () => {
     if (currentQuestionIndex < questions.length - 1) {
       transitionTo(currentQuestionIndex + 1);
     } else {
-      alert("All questions answered!\n" + JSON.stringify(answers, null, 2));
+      handleFinish();
     }
   };
 
@@ -160,10 +233,22 @@ const QuestionPage = ({ onRestart }) => {
     );
   }
 
-  if (error || questions.length === 0) {
+  if (error) {
     return (
       <div className="question-page loading-state">
-        <h2>{error || "No questions found."}</h2>
+        <div className="loader-content">
+          <span style={{ fontSize: '2.5rem' }}>⚠️</span>
+          <h2>{error}</h2>
+          <button className="btn btn-outlined" onClick={onRestart}>RETURN TO START</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (questions.length === 0) {
+    return (
+      <div className="question-page loading-state">
+        <h2>No questions found.</h2>
         <button className="btn btn-outlined" onClick={onRestart}>RETURN TO START</button>
       </div>
     );
@@ -173,6 +258,7 @@ const QuestionPage = ({ onRestart }) => {
   const stepNumber = String(currentQuestionIndex + 1).padStart(2, '0');
   const totalSteps = String(questions.length).padStart(2, '0');
   const progressPercent = ((currentQuestionIndex + 1) / questions.length) * 100;
+  const isLastQuestion = currentQuestionIndex === questions.length - 1;
 
   const optionCount = currentQ.options?.length || 0;
   const colCount = optionCount <= 4 ? 2 : 3;
@@ -184,8 +270,6 @@ const QuestionPage = ({ onRestart }) => {
         <div className="orb orb-1"></div>
         <div className="orb orb-2"></div>
         <div className="orb orb-3"></div>
-
-        {/* Animated Waves */}
         <div className="waves-container">
           <svg className="wave-svg" viewBox="0 0 1000 100" preserveAspectRatio="none">
             <path className="wave-path wave-1" d="M0,50 C150,110 350,0 500,50 C650,100 850,0 1000,50 L1000,100 L0,100 Z" />
@@ -195,7 +279,6 @@ const QuestionPage = ({ onRestart }) => {
         </div>
       </div>
 
-      {/* Main Content */}
       <main className="question-main">
         {/* Progress */}
         <div className="progress-section">
@@ -210,12 +293,10 @@ const QuestionPage = ({ onRestart }) => {
 
         {/* Breathing transition wrapper */}
         <div className={`question-content ${isTransitioning ? 'fade-out' : 'fade-in'}`}>
-          {/* BIG Question Title */}
           <h1 className="question-title">
             {renderQuestionText(currentQ.text)}
           </h1>
 
-          {/* Option Cards */}
           <div
             className={`energy-cards cols-${colCount}`}
             style={{ gridTemplateColumns: `repeat(${colCount}, 1fr)` }}
@@ -225,7 +306,7 @@ const QuestionPage = ({ onRestart }) => {
               const isPulsing = pulsingCard === opt.rawValue;
               const optData = getOptionData(currentQ.key, opt.rawValue, opt.label);
               return (
-                <div 
+                <div
                   key={idx}
                   className={`energy-card ${isSelected ? 'active' : ''} ${isPulsing ? 'pulse' : ''}`}
                   onClick={() => handleOptionSelect(opt.rawValue)}
@@ -239,14 +320,14 @@ const QuestionPage = ({ onRestart }) => {
 
             {currentQ.inputType === 'text' && (
               <div className="text-input-container" style={{ gridColumn: '1 / -1' }}>
-                 <input 
-                   type="text" 
-                   className="mood-text-input"
-                   placeholder="Type an artist name... or leave blank"
-                   value={answers[currentQ.key] || ''}
-                   onChange={(e) => handleOptionSelect(e.target.value)}
-                   autoFocus
-                 />
+                <input
+                  type="text"
+                  className="mood-text-input"
+                  placeholder="Type an artist name... or leave blank"
+                  value={answers[currentQ.key] || ''}
+                  onChange={(e) => handleOptionSelect(e.target.value)}
+                  autoFocus
+                />
               </div>
             )}
           </div>
@@ -254,24 +335,37 @@ const QuestionPage = ({ onRestart }) => {
 
         {/* Bottom Nav */}
         <div className="bottom-nav">
-          <button 
-            className="nav-btn" 
-            onClick={handlePrevious} 
+          <button
+            className="nav-btn"
+            onClick={handlePrevious}
             style={{ visibility: currentQuestionIndex === 0 ? 'hidden' : 'visible' }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg> 
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
             PREVIOUS
           </button>
-          
+
           <div className="pagination-dots">
             {questions.map((q, idx) => (
-               <span key={q.id} className={`dot ${idx === currentQuestionIndex ? 'active' : ''} ${idx < currentQuestionIndex ? 'completed' : ''}`} />
+              <span key={q.id} className={`dot ${idx === currentQuestionIndex ? 'active' : ''} ${idx < currentQuestionIndex ? 'completed' : ''}`} />
             ))}
           </div>
 
-          <button className="nav-btn next-btn" onClick={handleNext}>
-            {currentQuestionIndex === questions.length - 1 ? 'FINISH ' : 'NEXT QUESTION '} 
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+          <button
+            className={`nav-btn next-btn ${isSubmitting ? 'submitting' : ''}`}
+            onClick={handleNext}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <>
+                <span className="btn-spinner"></span>
+                GENERATING...
+              </>
+            ) : (
+              <>
+                {isLastQuestion ? 'FINISH' : 'NEXT QUESTION'}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+              </>
+            )}
           </button>
         </div>
       </main>
