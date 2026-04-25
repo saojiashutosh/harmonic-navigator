@@ -37,6 +37,10 @@ def build_playlist_for_session(
         music_preference=music_preference,
     )
 
+    # Use secondary mood for diversity mixing
+    secondary_mood = getattr(inference, "secondaryMoodLabel", None)
+    mood_blend_ratio = getattr(inference, "moodBlendRatio", 1.0) or 1.0
+
     candidate_tracks = _build_candidate_pool(
         mood_label=inference.moodLabel,
         social_setting=social_setting,
@@ -57,6 +61,8 @@ def build_playlist_for_session(
         relevance_score = _score_track(
             track=track,
             mood_label=inference.moodLabel,
+            secondary_mood=secondary_mood,
+            mood_blend_ratio=mood_blend_ratio,
             type_weights=type_weights,
             music_preference=music_preference,
             music_language=music_language,
@@ -68,7 +74,26 @@ def build_playlist_for_session(
         scored_tracks.append((track, relevance_score))
 
     scored_tracks.sort(key=lambda item: item[1], reverse=True)
-    chosen_tracks = scored_tracks[:limit]
+
+    # ── Secondary mood diversity mixing ───────────────────────────────
+    # When blend ratio < 1.0, reserve a portion of slots for secondary-mood tracks.
+    if secondary_mood and mood_blend_ratio < 1.0:
+        diversity_slots = max(1, int(limit * (1 - mood_blend_ratio) * 0.4))
+        primary_tracks = [t for t in scored_tracks if t[0].primaryMood == inference.moodLabel]
+        secondary_tracks = [
+            t for t in scored_tracks
+            if t[0].primaryMood == secondary_mood
+            and t not in primary_tracks
+        ]
+        # Take top primary, then interleave some secondary
+        primary_take = primary_tracks[: limit - diversity_slots]
+        secondary_take = secondary_tracks[:diversity_slots]
+        chosen_tracks = primary_take + secondary_take
+        # Re-sort by score for final ordering
+        chosen_tracks.sort(key=lambda item: item[1], reverse=True)
+        chosen_tracks = chosen_tracks[:limit]
+    else:
+        chosen_tracks = scored_tracks[:limit]
 
     with transaction.atomic():
         playlist = Playlist.objects.create(
@@ -123,17 +148,26 @@ def _build_candidate_pool(
     pool_size = max(limit * 25, 250)
     slice_size = max(limit * 8, 50)
     queries = [
+        # 1. Best match: all filters
         artist_q & language_q & style_q & type_q & mood_q,
+        # 2-3. Artist combos
         artist_q & language_q & type_q,
         artist_q & style_q & type_q,
+        # 4-5. Language + style/mood combos
         language_q & style_q & type_q & mood_q,
         language_q & style_q & type_q,
+        # 6-8. Partial combos prioritising language
         artist_q & mood_q,
         language_q & mood_q & type_q,
-        style_q & mood_q & type_q,
-        mood_q & type_q,
+        language_q & mood_q,           # language + mood, relax type
         language_q & type_q,
+        # 9. Language only — always return tracks in the requested language
+        language_q,
+        # 10-11. Style/type fallbacks (language wasn't available)
+        style_q & mood_q & type_q,
         style_q & type_q,
+        mood_q & type_q,
+        # 12-14. Bare fallbacks
         artist_q,
         type_q,
         mood_q,
@@ -191,6 +225,8 @@ def _score_track(
     *,
     track: Track,
     mood_label: str,
+    secondary_mood: str | None = None,
+    mood_blend_ratio: float = 1.0,
     type_weights: dict[str, float],
     music_preference: str | None,
     music_language: str | None,
@@ -201,10 +237,17 @@ def _score_track(
 ) -> float:
     score = 0.0
 
+    # ── Primary mood match ────────────────────────────────────────────
     if track.primaryMood == mood_label:
         score += 0.30
     elif track.primaryMood:
         score += 0.04
+
+    # ── Secondary mood bonus ──────────────────────────────────────────
+    if secondary_mood and track.primaryMood == secondary_mood:
+        # Scale bonus inversely with blend ratio — stronger when moods are close
+        secondary_bonus = 0.18 * (1.0 - mood_blend_ratio)
+        score += secondary_bonus
 
     score += type_weights.get(track.type, 0.0) * 0.18
 
@@ -256,13 +299,13 @@ def _taste_score(
     requested_language = _normalise(music_language)
     if requested_language and requested_language != "no_preference":
         if requested_language == "instrumental" and track.isInstrumental:
-            score += 0.45
+            score += 0.50
         elif requested_language == language:
-            score += 0.42
+            score += 0.55
         elif requested_language == "hindi" and genre == "bollywood":
-            score += 0.34
+            score += 0.40
         else:
-            score -= 0.12
+            score -= 0.25
 
     requested_style = _normalise(music_style)
     if requested_style and requested_style != "no_preference":
