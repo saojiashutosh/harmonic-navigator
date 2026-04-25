@@ -76,8 +76,18 @@ export const generatePlaylist = async (moodSessionId, limit = 10) => {
  * Returns: Array of playlist track objects (each includes a `track` sub-object)
  */
 export const fetchPlaylistTracks = async (playlistId) => {
-  const res = await fetch(`${BASE_URL}/playlists/playlist-tracks/?playlistId=${playlistId}`);
+  const res = await fetch(`${BASE_URL}/playlists/playlist-tracks/?playlistId=${playlistId}&ordering=position`);
   if (!res.ok) throw new Error(`Failed to fetch playlist tracks: ${res.status}`);
   const data = await res.json();
   return Array.isArray(data) ? data : data.results ?? [];
+};
+
+/**
+ * Fetch a YouTube Video ID for a given search query
+ */
+export const fetchYoutubeSearch = async (query) => {
+  const res = await fetch(`${BASE_URL}/playlists/youtube-search/?q=${encodeURIComponent(query)}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.videoId || null;
 };
