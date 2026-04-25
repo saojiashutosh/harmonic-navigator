@@ -1,4 +1,5 @@
 import React from 'react';
+import { usePlayer } from './PlayerContext';
 import './ResultsPage.css';
 
 const MOOD_META = {
@@ -17,6 +18,23 @@ const ResultsPage = ({ results, onRestart }) => {
   const { moodLabel, confidence, tracks = [] } = results ?? {};
   const meta = getMoodMeta(moodLabel);
   const confidencePct = Math.round((confidence ?? 0) * 100);
+  const player = usePlayer();
+
+  const handlePlayAll = () => {
+    if (tracks.length > 0) {
+      player.loadPlaylist(tracks, 0, meta.label.toUpperCase(), meta.color);
+    }
+  };
+
+  const handlePlayTrack = (idx) => {
+    if (tracks.length > 0) {
+      player.loadPlaylist(tracks, idx, meta.label.toUpperCase(), meta.color);
+    }
+  };
+
+  const isTrackPlaying = (idx) => {
+    return player.hasQueue && player.currentIndex === idx && player.queue === tracks;
+  };
 
   return (
     <div className="results-page">
@@ -66,10 +84,43 @@ const ResultsPage = ({ results, onRestart }) => {
           </div>
         </div>
 
-        {/* Divider */}
+        {/* Divider with Play All */}
         <div className="results-divider">
           <span>YOUR CURATED PLAYLIST</span>
         </div>
+
+        {/* Play All Button */}
+        {tracks.length > 0 && (() => {
+          const isPlaylistActive = player.hasQueue
+            && player.currentTrack?.id === tracks[player.currentIndex]?.id;
+
+          return (
+            <div className="play-all-container">
+              <button
+                className={`btn-play-all ${isPlaylistActive ? 'is-playing' : ''}`}
+                onClick={handlePlayAll}
+                style={{ '--mood-color': meta.color }}
+              >
+                {isPlaylistActive ? (
+                  <>
+                    <div className="play-all-bars">
+                      <span /><span /><span />
+                    </div>
+                    PLAYING
+                  </>
+                ) : (
+                  <>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                      <polygon points="5 3 19 12 5 21 5 3"/>
+                    </svg>
+                    PLAY ALL
+                  </>
+                )}
+              </button>
+              <span className="track-count-label">{tracks.length} tracks curated for you</span>
+            </div>
+          );
+        })()}
 
         {/* Track List */}
         {tracks.length === 0 ? (
@@ -79,42 +130,62 @@ const ResultsPage = ({ results, onRestart }) => {
           </div>
         ) : (
           <div className="tracks-grid">
-            {tracks.map((track, idx) => (
-              <div className="track-card" key={track?.id ?? idx}>
-                <div className="track-position">{String(idx + 1).padStart(2, '0')}</div>
-                <div className="track-info">
-                  <h3 className="track-title">{track?.title ?? 'Unknown Track'}</h3>
-                  <div className="track-meta">
-                    <span className="track-mood">{track?.primaryMood ?? moodLabel}</span>
-                    {track?.durationMinutes && (
-                      <span className="track-duration">{track.durationMinutes}</span>
-                    )}
-                    {track?.language && (
-                      <span className="track-lang">{track.language}</span>
+            {tracks.map((track, idx) => {
+              const isCurrentlyPlaying = player.hasQueue
+                && player.currentIndex === idx
+                && player.currentTrack?.id === track?.id;
+
+              return (
+                <div
+                  className={`track-card ${isCurrentlyPlaying ? 'track-active' : ''}`}
+                  key={track?.id ?? idx}
+                  onClick={() => handlePlayTrack(idx)}
+                >
+                  <div className="track-position">
+                    {isCurrentlyPlaying ? (
+                      <div className="track-playing-bars">
+                        <span style={{ animationPlayState: player.isPlaying ? 'running' : 'paused' }} />
+                        <span style={{ animationPlayState: player.isPlaying ? 'running' : 'paused' }} />
+                        <span style={{ animationPlayState: player.isPlaying ? 'running' : 'paused' }} />
+                      </div>
+                    ) : (
+                      String(idx + 1).padStart(2, '0')
                     )}
                   </div>
-                </div>
-                {track?.externalUrl ? (
-                  <a
-                    href={track.externalUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="track-play-btn"
-                    title="Open in Spotify"
+                  <div className="track-info">
+                    <h3 className="track-title">{track?.title ?? 'Unknown Track'}</h3>
+                    <div className="track-meta">
+                      <span className="track-mood">{track?.primaryMood ?? moodLabel}</span>
+                      {track?.durationMinutes && (
+                        <span className="track-duration">{track.durationMinutes}</span>
+                      )}
+                      {track?.language && (
+                        <span className="track-lang">{track.language}</span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    className={`track-play-btn ${isCurrentlyPlaying ? 'track-play-active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePlayTrack(idx);
+                    }}
+                    title="Play this track"
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
-                    </svg>
-                  </a>
-                ) : (
-                  <div className="track-play-btn track-play-disabled" title="No link available">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                    </svg>
-                  </div>
-                )}
-              </div>
-            ))}
+                    {isCurrentlyPlaying && player.isPlaying ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="4" width="4" height="16" rx="1"/>
+                        <rect x="14" y="4" width="4" height="16" rx="1"/>
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="5 3 19 12 5 21 5 3"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -123,14 +194,6 @@ const ResultsPage = ({ results, onRestart }) => {
           <button className="btn btn-outlined" onClick={onRestart}>
             START OVER
           </button>
-          <a
-            href={`https://open.spotify.com/search/${encodeURIComponent(meta.label + ' music')}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-primary"
-          >
-            EXPLORE ON SPOTIFY
-          </a>
         </div>
       </div>
     </div>
