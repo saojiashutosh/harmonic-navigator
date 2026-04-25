@@ -1,5 +1,6 @@
-from typing import Dict, Any
-from .models import Track
+from typing import Any, Dict
+
+from tracks.models import Track
 
 # Ported/adapted from services.py MOOD_SIGNATURES
 MOOD_MAPPING = {

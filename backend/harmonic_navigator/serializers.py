@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from collections import OrderedDict
-from utils.time import convert_time
+from helpers.time import convert_time
 
 
 class HarmonicBaseSerializer(serializers.ModelSerializer):

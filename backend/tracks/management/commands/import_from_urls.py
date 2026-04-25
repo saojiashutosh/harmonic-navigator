@@ -4,9 +4,9 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from tracks.models import Artist, Track
-from tracks.spotify_scraper import SpotifyScraper, extract_track_id_from_url
-from tracks.inference import FeatureInferenceService
-from tracks.excel_storage import sync_track_to_excel
+from helpers.excel_storage import sync_track_to_excel
+from helpers.spotify_scraper import SpotifyScraper, extract_track_id_from_url
+from helpers.track_inference import FeatureInferenceService
 
 class Command(BaseCommand):
     help = "Import Spotify tracks from a list of URLs using web scraping and feature inference."

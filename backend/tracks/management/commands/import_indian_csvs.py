@@ -1,8 +1,9 @@
 import csv
+from pathlib import Path
 import logging
-import os
 import glob
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
@@ -45,17 +46,18 @@ class Command(BaseCommand):
     help = "Bulk import Indian language tracks from CSVs dropped by user."
 
     def handle(self, *args, **options):
-        csv_files = glob.glob(os.path.join("/app", "*_songs.csv"))
-        
+        dataset_dir = Path(settings.BASE_DIR) / "data"
+        csv_files = glob.glob(str(dataset_dir / "*_songs.csv"))
+
         if not csv_files:
-            self.stdout.write("No files ending with '_songs.csv' found.")
+            self.stdout.write(f"No files ending with '_songs.csv' found in {dataset_dir}.")
             return
 
         created = 0
         skipped = 0
 
         for path in csv_files:
-            self.stdout.write(f"Processing {os.path.basename(path)}...")
+            self.stdout.write(f"Processing {Path(path).name}...")
             with open(path, newline="", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 
@@ -114,7 +116,7 @@ class Command(BaseCommand):
             f"Import complete - {created} tracks created, {skipped} duplicates skipped. Saving to Excel..."
         ))
         
-        from tracks.excel_storage import export_tracks_to_excel
+        from helpers.excel_storage import export_tracks_to_excel
         export_tracks_to_excel()
 
         self.stdout.write(self.style.SUCCESS("All synchronized to Excel successfully!"))

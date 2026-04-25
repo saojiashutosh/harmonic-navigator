@@ -4,9 +4,9 @@ from datetime import datetime
 
 from django.core.management.base import BaseCommand, CommandError
 
-from tracks.excel_storage import export_tracks_to_excel
+from helpers.excel_storage import export_tracks_to_excel
 from tracks.services import import_spotify_search_results
-from tracks.spotify_client import SpotifyConfigurationError, SpotifyImportError
+from helpers.spotify_client import SpotifyConfigurationError, SpotifyImportError
 
 
 DEFAULT_QUERY_PACKS = [

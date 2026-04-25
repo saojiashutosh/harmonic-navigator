@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from tracks.excel_storage import export_tracks_to_excel
+from helpers.excel_storage import export_tracks_to_excel
 from tracks.models import Track
 from tracks.services import (
     _build_key_signature,
@@ -14,9 +14,9 @@ from tracks.services import (
     derive_primary_mood,
     derive_track_type,
 )
-from tracks.spotify_client import SpotifyConfigurationError, SpotifyImportError, get_track, search_tracks
-from tracks.spotify_scraper import SpotifyScraper
-from tracks.inference import FeatureInferenceService
+from helpers.spotify_client import SpotifyConfigurationError, SpotifyImportError, get_track, search_tracks
+from helpers.spotify_scraper import SpotifyScraper
+from helpers.track_inference import FeatureInferenceService
 
 
 class Command(BaseCommand):

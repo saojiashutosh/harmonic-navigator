@@ -129,7 +129,8 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = env("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles"))
 
-SONG_EXCEL_BACKUP_PATH = env("SONG_EXCEL_BACKUP_PATH", str(BASE_DIR / "song_storage.xlsx"))
+DATA_DIR = BASE_DIR / "data"
+SONG_EXCEL_BACKUP_PATH = env("SONG_EXCEL_BACKUP_PATH", str(DATA_DIR / "song_storage.xlsx"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "users.Users"

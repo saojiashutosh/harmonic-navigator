@@ -1,8 +1,10 @@
 import csv
 import logging
+from pathlib import Path
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.conf import settings
 
 from tracks.models import Artist, Track
 
@@ -51,10 +53,12 @@ def safe_int(value: str) -> int | None:
 class Command(BaseCommand):
     help = "Import tracks from the Kaggle Spotify CSV dataset into the database."
 
+    default_dataset_path = Path(settings.BASE_DIR) / "data" / "spotify_dataset.csv"
+
     def add_arguments(self, parser):
         parser.add_argument(
             "--path",
-            default="/app/spotify_dataset.csv",
+            default=str(self.default_dataset_path),
             help="Path to the CSV file.",
         )
         parser.add_argument(
@@ -143,7 +147,7 @@ class Command(BaseCommand):
             f"Import complete — {created} tracks created, {skipped} skipped. Exporting to Excel..."
         ))
 
-        from tracks.excel_storage import export_tracks_to_excel
+        from helpers.excel_storage import export_tracks_to_excel
         export_tracks_to_excel()
 
         self.stdout.write(self.style.SUCCESS(

@@ -3,9 +3,9 @@ from __future__ import annotations
 from django.db import transaction
 from django.utils import timezone
 
-from .excel_storage import sync_track_to_excel
+from helpers.excel_storage import sync_track_to_excel
 from .models import Artist, AudioFeatureSnapshot, Track
-from .spotify_client import get_track, search_tracks
+from helpers.spotify_client import get_track, search_tracks
 
 
 MOOD_SIGNATURES = {

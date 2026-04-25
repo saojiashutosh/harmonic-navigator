@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand, CommandError
 
 from tracks.services import import_spotify_search_results, import_spotify_track_url
-from tracks.spotify_client import SpotifyConfigurationError, SpotifyImportError
+from helpers.spotify_client import SpotifyConfigurationError, SpotifyImportError
 
 
 class Command(BaseCommand):

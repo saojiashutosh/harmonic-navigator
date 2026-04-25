@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from . import models, serializers, filters
 from harmonic_navigator.views import HarmonicBaseViewSet
 from .services import import_spotify_search_results, import_spotify_track_url
-from .spotify_client import SpotifyConfigurationError, SpotifyImportError
+from helpers.spotify_client import SpotifyConfigurationError, SpotifyImportError
 
 
 class MoodTagView(HarmonicBaseViewSet):

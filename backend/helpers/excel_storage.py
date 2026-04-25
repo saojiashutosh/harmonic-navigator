@@ -12,7 +12,7 @@ from django.conf import settings
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from .models import Track
+from tracks.models import Track
 
 
 WORKSHEET_NAME = "Songs"

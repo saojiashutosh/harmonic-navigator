@@ -7,7 +7,7 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from tracks.excel_storage import export_tracks_to_excel
+from helpers.excel_storage import export_tracks_to_excel
 from tracks.models import Artist, Track
 from tracks.services import (
     derive_is_instrumental,
@@ -16,7 +16,7 @@ from tracks.services import (
     import_spotify_track,
     import_spotify_track_url,
 )
-from tracks.spotify_client import extract_spotify_track_id
+from helpers.spotify_client import extract_spotify_track_id
 from users.models import Users
 
 
