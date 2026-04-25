@@ -2,6 +2,43 @@
 # Keys must match Question.key values in the DB.
 # Values are dicts of {mood_label: weight} and can be negative.
 
+# ---------------------------------------------------------------------------
+# Category importance multipliers  (applied in inference.py)
+# ---------------------------------------------------------------------------
+CATEGORY_WEIGHTS = {
+    "emotion":    1.60,   # Strongest mood signal
+    "energy":     1.30,   # Maps directly to energy/valence
+    "cognition":  1.10,   # Sharp vs scattered matters
+    "activity":   1.00,   # Moderate signal
+    "preference": 0.90,   # Influences track selection more than mood
+    "context":    0.70,   # Weakest mood signal
+}
+
+# ---------------------------------------------------------------------------
+# Cross-question synergy bonuses
+# Each entry: (set of rawValue answers that must ALL be present, mood, bonus)
+# ---------------------------------------------------------------------------
+SYNERGY_BONUSES = [
+    ({"sad", "drifting", "escape"},           "melancholic",  0.35),
+    ({"happy", "charged", "party"},           "celebratory",  0.40),
+    ({"calm", "relaxing", "sleep"},           "calm",         0.35),
+    ({"sharp", "motivated", "focus"},         "focused",      0.30),
+    ({"tense", "scattered", "working"},       "anxious",      0.25),
+    ({"excited", "social", "party"},          "celebratory",  0.35),
+    ({"drained", "sad", "relaxing"},          "melancholic",  0.30),
+    ({"charged", "exercising", "uplift"},     "energized",    0.35),
+    ({"calm", "drifting", "relax"},           "calm",         0.30),
+    ({"happy", "exercising", "uplift"},       "energized",    0.30),
+    ({"flat", "blank", "escape"},             "melancholic",  0.30),
+    ({"sharp", "working", "focus"},           "focused",      0.28),
+    ({"excited", "charged", "uplift"},        "energized",    0.32),
+    ({"calm", "sleeping", "sleep"},           "calm",         0.40),
+    ({"tense", "drained", "escape"},          "anxious",      0.25),
+    ({"happy", "social", "lyrics"},           "celebratory",  0.25),
+    ({"sad", "alone", "lyrics"},              "melancholic",  0.28),
+    ({"motivated", "exercising", "party"},    "energized",    0.30),
+]
+
 QUESTION_DEFINITIONS = [
     {
         "key": "energy_level",
@@ -143,9 +180,38 @@ QUESTION_DEFINITIONS = [
         "order": 10,
         "options": [],
     },
+    {
+        "key": "time_of_day",
+        "text": "What time of day is it for you?",
+        "category": "context",
+        "inputType": "select",
+        "order": 11,
+        "options": [
+            {"rawValue": "morning", "label": "Morning — fresh start"},
+            {"rawValue": "afternoon", "label": "Afternoon — mid-day groove"},
+            {"rawValue": "evening", "label": "Evening — winding down"},
+            {"rawValue": "late_night", "label": "Late night — quiet hours"},
+        ],
+    },
+    {
+        "key": "nostalgia_craving",
+        "text": "What are you in the mood for?",
+        "category": "preference",
+        "inputType": "select",
+        "order": 12,
+        "options": [
+            {"rawValue": "discover_new", "label": "Discover something new"},
+            {"rawValue": "old_favorites", "label": "Old favourites, comfort songs"},
+            {"rawValue": "mix_both", "label": "A mix of both"},
+        ],
+    },
 ]
 
+# ---------------------------------------------------------------------------
+# QUESTION_WEIGHTS — mood nudges per (question_key + rawValue) combo
+# ---------------------------------------------------------------------------
 QUESTION_WEIGHTS = {
+    # ── energy_level ──────────────────────────────────────────────────────
     "energy_level_drained": {
         "calm": 0.45,
         "melancholic": 0.55,
@@ -186,6 +252,7 @@ QUESTION_WEIGHTS = {
         "melancholic": -0.30,
         "anxious": 0.10,
     },
+    # ── emotional_tone ────────────────────────────────────────────────────
     "emotional_tone_happy": {
         "energized": 0.35,
         "celebratory": 0.40,
@@ -234,6 +301,7 @@ QUESTION_WEIGHTS = {
         "melancholic": -0.45,
         "anxious": -0.15,
     },
+    # ── mental_state ──────────────────────────────────────────────────────
     "mental_state_sharp": {
         "focused": 0.60,
         "energized": 0.15,
@@ -274,6 +342,7 @@ QUESTION_WEIGHTS = {
         "celebratory": -0.40,
         "anxious": 0.05,
     },
+    # ── activity ──────────────────────────────────────────────────────────
     "activity_working": {
         "focused": 0.60,
         "calm": 0.15,
@@ -322,6 +391,7 @@ QUESTION_WEIGHTS = {
         "celebratory": -0.55,
         "anxious": -0.30,
     },
+    # ── social_setting ────────────────────────────────────────────────────
     "social_setting_alone": {
         "focused": 0.10,
         "melancholic": 0.10,
@@ -354,6 +424,7 @@ QUESTION_WEIGHTS = {
         "energized": -0.10,
         "melancholic": -0.05,
     },
+    # ── music_preference ──────────────────────────────────────────────────
     "music_preference_lyrics": {
         "celebratory": 0.10,
         "energized": 0.10,
@@ -386,6 +457,129 @@ QUESTION_WEIGHTS = {
         "melancholic": 0.00,
         "anxious": 0.00,
     },
+    # ── music_language (NEW — previously missing) ─────────────────────────
+    "music_language_no_preference": {
+        "energized": 0.00,
+        "celebratory": 0.00,
+        "focused": 0.00,
+        "calm": 0.00,
+        "melancholic": 0.00,
+        "anxious": 0.00,
+    },
+    "music_language_hindi": {
+        "celebratory": 0.12,
+        "energized": 0.10,
+        "melancholic": 0.05,
+        "calm": -0.05,
+        "focused": -0.05,
+        "anxious": -0.03,
+    },
+    "music_language_english": {
+        "energized": 0.08,
+        "celebratory": 0.06,
+        "focused": 0.04,
+        "calm": -0.02,
+        "melancholic": -0.02,
+        "anxious": -0.02,
+    },
+    "music_language_marathi": {
+        "calm": 0.10,
+        "melancholic": 0.08,
+        "celebratory": 0.05,
+        "energized": 0.00,
+        "focused": -0.02,
+        "anxious": -0.03,
+    },
+    "music_language_punjabi": {
+        "energized": 0.15,
+        "celebratory": 0.18,
+        "focused": -0.05,
+        "calm": -0.08,
+        "melancholic": -0.10,
+        "anxious": -0.05,
+    },
+    "music_language_instrumental": {
+        "focused": 0.18,
+        "calm": 0.15,
+        "melancholic": 0.05,
+        "energized": -0.08,
+        "celebratory": -0.12,
+        "anxious": -0.05,
+    },
+    # ── music_style (NEW — previously missing) ────────────────────────────
+    "music_style_no_preference": {
+        "energized": 0.00,
+        "celebratory": 0.00,
+        "focused": 0.00,
+        "calm": 0.00,
+        "melancholic": 0.00,
+        "anxious": 0.00,
+    },
+    "music_style_bollywood": {
+        "celebratory": 0.14,
+        "energized": 0.12,
+        "melancholic": 0.05,
+        "calm": -0.05,
+        "focused": -0.08,
+        "anxious": -0.05,
+    },
+    "music_style_hollywood": {
+        "energized": 0.10,
+        "celebratory": 0.08,
+        "focused": 0.04,
+        "calm": -0.03,
+        "melancholic": -0.03,
+        "anxious": -0.03,
+    },
+    "music_style_pop": {
+        "energized": 0.12,
+        "celebratory": 0.10,
+        "focused": -0.05,
+        "calm": -0.08,
+        "melancholic": -0.05,
+        "anxious": -0.05,
+    },
+    "music_style_indie": {
+        "melancholic": 0.12,
+        "calm": 0.10,
+        "focused": 0.05,
+        "energized": -0.05,
+        "celebratory": -0.08,
+        "anxious": 0.00,
+    },
+    "music_style_classical": {
+        "calm": 0.18,
+        "focused": 0.14,
+        "melancholic": 0.08,
+        "energized": -0.10,
+        "celebratory": -0.12,
+        "anxious": -0.10,
+    },
+    "music_style_raga": {
+        "calm": 0.20,
+        "focused": 0.12,
+        "melancholic": 0.10,
+        "energized": -0.12,
+        "celebratory": -0.14,
+        "anxious": -0.08,
+    },
+    "music_style_lofi": {
+        "calm": 0.20,
+        "focused": 0.15,
+        "melancholic": 0.10,
+        "energized": -0.15,
+        "celebratory": -0.18,
+        "anxious": -0.08,
+    },
+    "music_style_devotional": {
+        "calm": 0.25,
+        "melancholic": 0.08,
+        "focused": 0.05,
+        "energized": -0.12,
+        "celebratory": -0.10,
+        "anxious": -0.15,
+    },
+    # ── playlist_goal ─────────────────────────────────────────────────────
     "playlist_goal_focus": {
         "focused": 0.95,
         "calm": 0.15,
@@ -434,59 +628,138 @@ QUESTION_WEIGHTS = {
         "celebratory": -0.60,
         "anxious": -0.35,
     },
+    # ── time_of_day (NEW question) ────────────────────────────────────────
+    "time_of_day_morning": {
+        "energized": 0.25,
+        "focused": 0.20,
+        "celebratory": 0.05,
+        "calm": -0.05,
+        "melancholic": -0.15,
+        "anxious": -0.08,
+    },
+    "time_of_day_afternoon": {
+        "focused": 0.15,
+        "energized": 0.10,
+        "calm": 0.05,
+        "celebratory": 0.00,
+        "melancholic": -0.05,
+        "anxious": 0.00,
+    },
+    "time_of_day_evening": {
+        "calm": 0.20,
+        "melancholic": 0.12,
+        "focused": -0.05,
+        "energized": -0.10,
+        "celebratory": 0.05,
+        "anxious": -0.05,
+    },
+    "time_of_day_late_night": {
+        "calm": 0.30,
+        "melancholic": 0.22,
+        "focused": -0.10,
+        "energized": -0.25,
+        "celebratory": -0.20,
+        "anxious": 0.05,
+    },
+    # ── nostalgia_craving (NEW question) ──────────────────────────────────
+    "nostalgia_craving_discover_new": {
+        "energized": 0.12,
+        "celebratory": 0.08,
+        "focused": 0.05,
+        "calm": -0.05,
+        "melancholic": -0.08,
+        "anxious": -0.02,
+    },
+    "nostalgia_craving_old_favorites": {
+        "melancholic": 0.18,
+        "calm": 0.12,
+        "celebratory": 0.05,
+        "focused": -0.05,
+        "energized": -0.08,
+        "anxious": -0.05,
+    },
+    "nostalgia_craving_mix_both": {
+        "energized": 0.02,
+        "celebratory": 0.02,
+        "focused": 0.02,
+        "calm": 0.02,
+        "melancholic": 0.02,
+        "anxious": 0.00,
+    },
 }
 
+# ---------------------------------------------------------------------------
+# Per-option intensity values  (graduated, no longer flat 1.0)
+# ---------------------------------------------------------------------------
 OPTION_WEIGHTS = {
-    "drained": 1.0,
-    "low": 1.0,
-    "mid": 1.0,
-    "good": 1.0,
-    "charged": 1.0,
-    "happy": 1.0,
-    "calm": 0.75,
-    "sad": 0.25,
-    "tense": 0.50,
-    "flat": 0.20,
-    "excited": 1.0,
-    "sharp": 1.0,
-    "scattered": 0.30,
-    "drifting": 0.40,
-    "motivated": 1.0,
-    "blank": 0.20,
-    "working": 1.0,
-    "exercising": 1.0,
-    "relaxing": 1.0,
-    "commuting": 1.0,
-    "social": 1.0,
-    "sleeping": 1.0,
-    "alone": 1.0,
-    "others": 1.0,
-    "kids": 1.0,
-    "meeting": 1.0,
-    "lyrics": 1.0,
-    "no_lyrics": 1.0,
-    "background": 1.0,
-    "surprise": 1.0,
-    "no_preference": 1.0,
-    "hindi": 1.0,
-    "english": 1.0,
-    "marathi": 1.0,
-    "punjabi": 1.0,
-    "instrumental": 1.0,
-    "bollywood": 1.0,
-    "hollywood": 1.0,
-    "pop": 1.0,
-    "indie": 1.0,
-    "classical": 1.0,
-    "raga": 1.0,
-    "lofi": 1.0,
-    "devotional": 1.0,
-    "focus": 1.0,
-    "relax": 1.0,
-    "uplift": 1.0,
-    "escape": 1.0,
-    "party": 1.0,
-    "sleep": 1.0,
+    # energy_level — reflects how much intensity the answer carries
+    "drained":    0.15,
+    "low":        0.35,
+    "mid":        0.55,
+    "good":       0.80,
+    "charged":    1.00,
+    # emotional_tone
+    "happy":      1.00,
+    "calm":       0.75,
+    "sad":        0.30,
+    "tense":      0.55,
+    "flat":       0.20,
+    "excited":    1.00,
+    # mental_state
+    "sharp":      1.00,
+    "scattered":  0.30,
+    "drifting":   0.40,
+    "motivated":  1.00,
+    "blank":      0.20,
+    # activity — all equally intentional, keep at 1.0
+    "working":    1.00,
+    "exercising": 1.00,
+    "relaxing":   1.00,
+    "commuting":  1.00,
+    "social":     1.00,
+    "sleeping":   1.00,
+    # social_setting — all equally valid contexts
+    "alone":      1.00,
+    "others":     1.00,
+    "kids":       1.00,
+    "meeting":    1.00,
+    # music_preference
+    "lyrics":         1.00,
+    "no_lyrics":      1.00,
+    "background":     1.00,
+    "surprise":       1.00,
+    # music_language
+    "no_preference":  1.00,
+    "hindi":          1.00,
+    "english":        1.00,
+    "marathi":        1.00,
+    "punjabi":        1.00,
+    "instrumental":   1.00,
+    # music_style
+    "bollywood":      1.00,
+    "hollywood":      1.00,
+    "pop":            1.00,
+    "indie":          1.00,
+    "classical":      1.00,
+    "raga":           1.00,
+    "lofi":           1.00,
+    "devotional":     1.00,
+    # playlist_goal — all equally intentional
+    "focus":          1.00,
+    "relax":          1.00,
+    "uplift":         1.00,
+    "escape":         1.00,
+    "party":          1.00,
+    "sleep":          1.00,
+    # time_of_day (new)
+    "morning":        1.00,
+    "afternoon":      1.00,
+    "evening":        1.00,
+    "late_night":     1.00,
+    # nostalgia_craving (new)
+    "discover_new":   1.00,
+    "old_favorites":  1.00,
+    "mix_both":       1.00,
 }
 
 MUSIC_PREFERENCE_OVERRIDES = {

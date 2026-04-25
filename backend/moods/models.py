@@ -207,6 +207,38 @@ class MoodInference(HarmonicBaseModel):
         db_column="raw_scores",
     )
 
+    secondaryMoodLabel = models.CharField(
+        max_length=32,
+        choices=MoodChoices.choices,
+        null=True,
+        blank=True,
+        verbose_name=_("Secondary Mood Label"),
+        db_column="secondary_mood_label",
+    )
+
+    secondaryConfidence = models.FloatField(
+        validators=[
+            MinValueValidator(0.0),
+            MaxValueValidator(1.0),
+        ],
+        null=True,
+        blank=True,
+        default=None,
+        verbose_name=_("Secondary Confidence"),
+        db_column="secondary_confidence",
+    )
+
+    moodBlendRatio = models.FloatField(
+        validators=[
+            MinValueValidator(0.0),
+            MaxValueValidator(1.0),
+        ],
+        default=1.0,
+        verbose_name=_("Mood Blend Ratio"),
+        db_column="mood_blend_ratio",
+        help_text=_("1.0 = pure primary mood, 0.5 = equal blend with secondary"),
+    )
+
     class Meta:
         db_table = "mood_inferences"
         verbose_name = "Mood Inference"

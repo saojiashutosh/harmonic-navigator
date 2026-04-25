@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.db import transaction
 from django.utils import timezone
 
+from moods.constants import QUESTION_DEFINITIONS
 from moods.inference import (
     build_weight_key,
     infer_mood_from_responses,
@@ -77,6 +78,14 @@ def _save_answers(session: MoodSession, answers: list[dict]) -> None:
     Answer.objects.bulk_create(rows)
 
 
+# Build a category lookup from QUESTION_DEFINITIONS so we don't need
+# an extra DB query.
+_QUESTION_CATEGORY_MAP = {
+    defn["key"]: defn["category"]
+    for defn in QUESTION_DEFINITIONS
+}
+
+
 def _infer_mood(session: MoodSession) -> MoodInference:
     existing = MoodInference.objects.filter(moodSessionId=session).first()
     if existing:
@@ -87,16 +96,32 @@ def _infer_mood(session: MoodSession) -> MoodInference:
         {
             "weight_key": build_weight_key(answer.questionId, answer.rawValue),
             "value": answer.value,
+            "raw_value": answer.rawValue,
+            "category": answer.questionId.category,
         }
         for answer in answers
     ]
-    top_mood, confidence, probabilities = infer_mood_from_responses(responses)
+
+    (
+        top_mood,
+        secondary_mood,
+        confidence,
+        secondary_confidence,
+        mood_blend_ratio,
+        probabilities,
+    ) = infer_mood_from_responses(
+        responses,
+        question_categories=_QUESTION_CATEGORY_MAP,
+    )
 
     return MoodInference.objects.create(
         moodSessionId=session,
         moodLabel=top_mood,
         confidence=confidence,
         rawScores=probabilities,
+        secondaryMoodLabel=secondary_mood,
+        secondaryConfidence=secondary_confidence,
+        moodBlendRatio=mood_blend_ratio,
     )
 
 

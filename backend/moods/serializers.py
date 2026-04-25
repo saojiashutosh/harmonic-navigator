@@ -72,6 +72,9 @@ class MoodInferenceSerializer(HarmonicBaseSerializer):
             "moodLabel",
             "confidence",
             "rawScores",
+            "secondaryMoodLabel",
+            "secondaryConfidence",
+            "moodBlendRatio",
             "is_high_confidence",
         )
 
