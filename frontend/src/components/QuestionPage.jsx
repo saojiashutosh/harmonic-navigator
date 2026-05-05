@@ -92,7 +92,7 @@ const getOptionData = (questionKey, rawValue, fallbackLabel) => {
   return { emoji: "🎵", title: fallbackLabel, desc: "" };
 };
 
-// Split question text: last 2 words get the gradient treatment
+// Render question text with the last 2 words highlighted in teal
 const renderQuestionText = (text) => {
   const clean = text.replace(/\?$/, '');
   const words = clean.split(' ');
@@ -109,7 +109,7 @@ const renderQuestionText = (text) => {
   );
 };
 
-const QuestionPage = ({ onRestart, onComplete }) => {
+const QuestionPage = ({ onRestart, onComplete, onInteraction, onGenerating }) => {
   const [questions, setQuestions] = useState([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState({});
@@ -129,9 +129,7 @@ const QuestionPage = ({ onRestart, onComplete }) => {
         createMoodSession(),
       ]);
 
-      if (!isMounted) {
-        return;
-      }
+      if (!isMounted) return;
 
       if (questionsResult.status === 'fulfilled') {
         setQuestions(questionsResult.value);
@@ -158,16 +156,11 @@ const QuestionPage = ({ onRestart, onComplete }) => {
       }
     });
 
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, []);
 
   const ensureSessionId = async () => {
-    if (sessionId) {
-      return sessionId;
-    }
-
+    if (sessionId) return sessionId;
     const session = await createMoodSession();
     setSessionId(session.id);
     return session.id;
@@ -177,7 +170,9 @@ const QuestionPage = ({ onRestart, onComplete }) => {
     const currentQ = questions[currentQuestionIndex];
     setAnswers(prev => ({ ...prev, [currentQ.key]: value }));
     setPulsingCard(value);
-    setTimeout(() => setPulsingCard(null), 400);
+    setTimeout(() => setPulsingCard(null), 350);
+    // Trigger wave ripple
+    onInteraction?.();
   };
 
   const transitionTo = (nextIndex) => {
@@ -193,6 +188,7 @@ const QuestionPage = ({ onRestart, onComplete }) => {
     finishStartedRef.current = true;
     setIsSubmitting(true);
     setError(null);
+    onGenerating?.(true);
     let completed = false;
     try {
       const activeSessionId = await ensureSessionId();
@@ -217,8 +213,9 @@ const QuestionPage = ({ onRestart, onComplete }) => {
       completed = true;
     } catch (err) {
       console.error('Finish failed:', err);
-      setError('Something went wrong while generating your playlist. Please try again.');
+      setError('Something went wrong generating your playlist. Please try again.');
     } finally {
+      onGenerating?.(false);
       if (!completed) {
         finishStartedRef.current = false;
         setIsSubmitting(false);
@@ -227,6 +224,7 @@ const QuestionPage = ({ onRestart, onComplete }) => {
   };
 
   const handleNext = () => {
+    onInteraction?.();
     if (currentQuestionIndex < questions.length - 1) {
       transitionTo(currentQuestionIndex + 1);
     } else {
@@ -243,10 +241,9 @@ const QuestionPage = ({ onRestart, onComplete }) => {
   if (isLoading) {
     return (
       <div className="question-page loading-state">
-        <div className="ambient-bg"><div className="orb orb-1"></div><div className="orb orb-2"></div></div>
         <div className="loader-content">
-          <div className="pulse-ring"></div>
-          <h2>Tuning your frequency...</h2>
+          <div className="pulse-ring" />
+          <h2>Getting things ready...</h2>
         </div>
       </div>
     );
@@ -255,10 +252,9 @@ const QuestionPage = ({ onRestart, onComplete }) => {
   if (isSubmitting) {
     return (
       <div className="question-page loading-state">
-        <div className="ambient-bg"><div className="orb orb-1"></div><div className="orb orb-2"></div></div>
         <div className="loader-content">
-          <div className="pulse-ring"></div>
-          <h2>Generating your playlist...</h2>
+          <div className="pulse-ring" />
+          <h2>Creating your playlist...</h2>
         </div>
       </div>
     );
@@ -268,9 +264,9 @@ const QuestionPage = ({ onRestart, onComplete }) => {
     return (
       <div className="question-page loading-state">
         <div className="loader-content">
-          <span style={{ fontSize: '2.5rem' }}>⚠️</span>
+          <span style={{ fontSize: '2.5rem' }}>🎵</span>
           <h2>{error}</h2>
-          <button className="btn btn-outlined" onClick={onRestart}>RETURN TO START</button>
+          <button className="btn btn-outlined" onClick={onRestart}>Return Home</button>
         </div>
       </div>
     );
@@ -280,7 +276,7 @@ const QuestionPage = ({ onRestart, onComplete }) => {
     return (
       <div className="question-page loading-state">
         <h2>No questions found.</h2>
-        <button className="btn btn-outlined" onClick={onRestart}>RETURN TO START</button>
+        <button className="btn btn-outlined" onClick={onRestart}>Return Home</button>
       </div>
     );
   }
@@ -295,35 +291,24 @@ const QuestionPage = ({ onRestart, onComplete }) => {
   const colCount = optionCount <= 4 ? 2 : 3;
 
   return (
-    <div className="question-page">
-      {/* Ambient background */}
-      <div className="ambient-bg">
-        <div className="orb orb-1"></div>
-        <div className="orb orb-2"></div>
-        <div className="orb orb-3"></div>
-        <div className="waves-container">
-          <svg className="wave-svg" viewBox="0 0 1000 100" preserveAspectRatio="none">
-            <path className="wave-path wave-1" d="M0,50 C150,110 350,0 500,50 C650,100 850,0 1000,50 L1000,100 L0,100 Z" />
-            <path className="wave-path wave-2" d="M0,50 C150,0 350,110 500,50 C650,0 850,110 1000,50 L1000,100 L0,100 Z" />
-            <path className="wave-path wave-3" d="M0,50 C150,100 350,0 500,50 C650,100 850,0 1000,50 L1000,100 L0,100 Z" />
-          </svg>
-        </div>
-      </div>
-
+    <div className="question-page" role="form" aria-label="Mood assessment">
       <main className="question-main">
         {/* Progress */}
-        <div className="progress-section">
+        <div className="progress-section" aria-label="Question progress">
           <div className="progress-header">
-            <span className="step-label">STEP {stepNumber} / {totalSteps}</span>
-            <span className="category-label">{currentQ.category?.replace('_', ' ').toUpperCase() || 'QUESTION'}</span>
+            <span className="step-label">Step {stepNumber} of {totalSteps}</span>
+            <span className="category-label">{currentQ.category?.replace('_', ' ') || 'Question'}</span>
           </div>
-          <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${progressPercent}%` }}></div>
+          <div className="progress-bar" role="progressbar" aria-valuenow={progressPercent} aria-valuemin="0" aria-valuemax="100">
+            <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
           </div>
         </div>
 
         {/* Breathing transition wrapper */}
-        <div className={`question-content ${isTransitioning ? 'fade-out' : 'fade-in'}`}>
+        <div
+          className={`question-content ${isTransitioning ? 'fade-out' : 'fade-in'}`}
+          aria-live="polite"
+        >
           <h1 className="question-title">
             {renderQuestionText(currentQ.text)}
           </h1>
@@ -331,6 +316,8 @@ const QuestionPage = ({ onRestart, onComplete }) => {
           <div
             className={`energy-cards cols-${colCount}`}
             style={{ gridTemplateColumns: `repeat(${colCount}, 1fr)` }}
+            role="radiogroup"
+            aria-label={currentQ.text}
           >
             {currentQ.inputType === 'select' && currentQ.options.map((opt, idx) => {
               const isSelected = answers[currentQ.key] === opt.rawValue;
@@ -341,8 +328,13 @@ const QuestionPage = ({ onRestart, onComplete }) => {
                   key={idx}
                   className={`energy-card ${isSelected ? 'active' : ''} ${isPulsing ? 'pulse' : ''}`}
                   onClick={() => handleOptionSelect(opt.rawValue)}
+                  onMouseEnter={() => onInteraction?.()}
+                  role="radio"
+                  aria-checked={isSelected}
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOptionSelect(opt.rawValue); } }}
                 >
-                  <span className="card-emoji">{optData.emoji}</span>
+                  <span className="card-emoji" aria-hidden="true">{optData.emoji}</span>
                   <h3 className="card-title-text">{optData.title}</h3>
                   {optData.desc && <p className="card-desc-text">{optData.desc}</p>}
                 </div>
@@ -358,6 +350,7 @@ const QuestionPage = ({ onRestart, onComplete }) => {
                   value={answers[currentQ.key] || ''}
                   onChange={(e) => handleOptionSelect(e.target.value)}
                   autoFocus
+                  aria-label="Artist name input"
                 />
               </div>
             )}
@@ -370,12 +363,13 @@ const QuestionPage = ({ onRestart, onComplete }) => {
             className="nav-btn"
             onClick={handlePrevious}
             style={{ visibility: currentQuestionIndex === 0 ? 'hidden' : 'visible' }}
+            aria-label="Previous question"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-            PREVIOUS
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
+            Previous
           </button>
 
-          <div className="pagination-dots">
+          <div className="pagination-dots" aria-hidden="true">
             {questions.map((q, idx) => (
               <span key={q.id} className={`dot ${idx === currentQuestionIndex ? 'active' : ''} ${idx < currentQuestionIndex ? 'completed' : ''}`} />
             ))}
@@ -385,16 +379,17 @@ const QuestionPage = ({ onRestart, onComplete }) => {
             className={`nav-btn next-btn ${isSubmitting ? 'submitting' : ''}`}
             onClick={handleNext}
             disabled={isSubmitting}
+            aria-label={isLastQuestion ? 'Generate playlist' : 'Next question'}
           >
             {isSubmitting ? (
               <>
-                <span className="btn-spinner"></span>
-                GENERATING...
+                <span className="btn-spinner" />
+                Generating...
               </>
             ) : (
               <>
-                {isLastQuestion ? 'FINISH' : 'NEXT QUESTION'}
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                {isLastQuestion ? 'Finish' : 'Next'}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
               </>
             )}
           </button>

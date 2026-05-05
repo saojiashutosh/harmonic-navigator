@@ -13,17 +13,22 @@ export const PlayerProvider = ({ children }) => {
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [moodColor, setMoodColor] = useState('#818CF8');
+  const [moodColor, setMoodColor] = useState('#5B8A8A');
   const [moodLabel, setMoodLabel] = useState('');
   // Incremented on every track change to force iframe reload
   const [embedKey, setEmbedKey] = useState(0);
+
+  // Playback tracking
+  const [progress, setProgress] = useState(0); // 0 to 1
+  const [duration, setDuration] = useState(0); // seconds
+  const [seekTo, setSeekTo] = useState(null); // Function to seek
 
   const currentTrack = currentIndex >= 0 && currentIndex < queue.length
     ? queue[currentIndex]
     : null;
 
   // Load and play a playlist
-  const loadPlaylist = useCallback((tracks, startIdx = 0, mood = '', color = '#818CF8') => {
+  const loadPlaylist = useCallback((tracks, startIdx = 0, mood = '', color = '#5B8A8A') => {
     setQueue(tracks);
     setCurrentIndex(startIdx);
     setIsPlaying(true);
@@ -95,6 +100,12 @@ export const PlayerProvider = ({ children }) => {
         closePlayer,
         setIsMinimized,
         loadPlaylist,
+        progress,
+        setProgress,
+        duration,
+        setDuration,
+        seekTo,
+        setSeekTo,
       }}
     >
       {children}

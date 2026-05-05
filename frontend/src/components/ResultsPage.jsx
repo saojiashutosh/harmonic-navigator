@@ -3,18 +3,18 @@ import { usePlayer } from './PlayerContext';
 import './ResultsPage.css';
 
 const MOOD_META = {
-  focused:     { emoji: '🎯', label: 'Focused',     color: '#818CF8', desc: 'Sharp, clear, and ready to move forward.' },
-  energized:   { emoji: '⚡', label: 'Energized',   color: '#F59E0B', desc: 'Charged up, alive, and full of momentum.' },
-  calm:        { emoji: '🧘', label: 'Calm',         color: '#2DD4BF', desc: 'Grounded, still, and at ease.' },
-  melancholic: { emoji: '🌧️', label: 'Melancholic', color: '#7C3AED', desc: 'Reflective, tender, and beautifully sad.' },
-  anxious:     { emoji: '🌀', label: 'Anxious',      color: '#EF4444', desc: 'Restless energy that needs to breathe.' },
-  celebratory: { emoji: '🎉', label: 'Celebratory', color: '#EC4899', desc: 'Joyful, bright, and ready to party.' },
+  focused:     { emoji: '🎯', label: 'Focused',     color: '#5B8A8A', desc: 'Sharp, clear, and ready to move forward.' },
+  energized:   { emoji: '⚡', label: 'Energized',   color: '#C4A882', desc: 'Charged up, alive, and full of momentum.' },
+  calm:        { emoji: '🧘', label: 'Calm',         color: '#7CAE7A', desc: 'Grounded, still, and at ease.' },
+  melancholic: { emoji: '🌧️', label: 'Melancholic', color: '#9B8EC4', desc: 'Reflective, tender, and beautifully sad.' },
+  anxious:     { emoji: '🌀', label: 'Anxious',      color: '#C47A7A', desc: 'Restless energy that needs to breathe.' },
+  celebratory: { emoji: '🎉', label: 'Celebratory', color: '#C4A882', desc: 'Joyful, bright, and ready to celebrate.' },
 };
 
 const getMoodMeta = (label) =>
-  MOOD_META[label?.toLowerCase()] ?? { emoji: '🎵', label: label ?? 'Curated', color: '#818CF8', desc: 'A sound that resonates with you.' };
+  MOOD_META[label?.toLowerCase()] ?? { emoji: '🎵', label: label ?? 'Curated', color: '#5B8A8A', desc: 'A sound that resonates with you.' };
 
-const ResultsPage = ({ results, onRestart }) => {
+const ResultsPage = ({ results, onRestart, onInteraction }) => {
   const { moodLabel, confidence, tracks = [] } = results ?? {};
   const meta = getMoodMeta(moodLabel);
   const confidencePct = Math.round((confidence ?? 0) * 100);
@@ -22,49 +22,33 @@ const ResultsPage = ({ results, onRestart }) => {
 
   const handlePlayAll = () => {
     if (tracks.length > 0) {
-      player.loadPlaylist(tracks, 0, meta.label.toUpperCase(), meta.color);
+      player.loadPlaylist(tracks, 0, meta.label, meta.color);
     }
   };
 
   const handlePlayTrack = (idx) => {
+    onInteraction?.();
     if (tracks.length > 0) {
-      player.loadPlaylist(tracks, idx, meta.label.toUpperCase(), meta.color);
+      player.loadPlaylist(tracks, idx, meta.label, meta.color);
     }
-  };
-
-  const isTrackPlaying = (idx) => {
-    return player.hasQueue && player.currentIndex === idx && player.queue === tracks;
   };
 
   return (
     <div className="results-page">
-      {/* Ambient background */}
-      <div className="ambient-bg">
-        <div className="orb orb-1" style={{ '--orb-color': meta.color + '33' }}></div>
-        <div className="orb orb-2"></div>
-        <div className="orb orb-3"></div>
-        <div className="waves-container">
-          <svg className="wave-svg" viewBox="0 0 1000 100" preserveAspectRatio="none">
-            <path className="wave-path wave-1" d="M0,50 C150,110 350,0 500,50 C650,100 850,0 1000,50 L1000,100 L0,100 Z" />
-            <path className="wave-path wave-2" d="M0,50 C150,0 350,110 500,50 C650,0 850,110 1000,50 L1000,100 L0,100 Z" />
-          </svg>
-        </div>
-      </div>
-
       <div className="results-main container">
         {/* Mood Hero */}
         <div className="mood-hero">
           <div className="mood-emoji-ring" style={{ '--mood-color': meta.color }}>
-            <span className="mood-emoji">{meta.emoji}</span>
+            <span className="mood-emoji" aria-hidden="true">{meta.emoji}</span>
           </div>
           <div className="mood-hero-text">
-            <span className="results-subtitle">YOUR CURRENT RESONANCE</span>
+            <span className="results-subtitle">Your Current Resonance</span>
             <h1 className="mood-title" style={{ '--mood-color': meta.color }}>
               {meta.label}
             </h1>
             <p className="mood-desc">{meta.desc}</p>
           </div>
-          <div className="confidence-badge">
+          <div className="confidence-badge" aria-label={`${confidencePct}% match confidence`}>
             <div className="confidence-ring">
               <svg viewBox="0 0 36 36" className="confidence-svg">
                 <path
@@ -80,16 +64,16 @@ const ResultsPage = ({ results, onRestart }) => {
               </svg>
               <span className="confidence-number">{confidencePct}%</span>
             </div>
-            <span className="confidence-label">MATCH</span>
+            <span className="confidence-label">Match</span>
           </div>
         </div>
 
-        {/* Divider with Play All */}
+        {/* Divider */}
         <div className="results-divider">
-          <span>YOUR CURATED PLAYLIST</span>
+          <span>Your Curated Playlist</span>
         </div>
 
-        {/* Play All Button */}
+        {/* Play All */}
         {tracks.length > 0 && (() => {
           const isPlaylistActive = player.hasQueue
             && player.currentTrack?.id === tracks[player.currentIndex]?.id;
@@ -100,20 +84,21 @@ const ResultsPage = ({ results, onRestart }) => {
                 className={`btn-play-all ${isPlaylistActive ? 'is-playing' : ''}`}
                 onClick={handlePlayAll}
                 style={{ '--mood-color': meta.color }}
+                aria-label={isPlaylistActive ? 'Currently playing' : 'Play all tracks'}
               >
                 {isPlaylistActive ? (
                   <>
-                    <div className="play-all-bars">
+                    <div className="play-all-bars" aria-hidden="true">
                       <span /><span /><span />
                     </div>
-                    PLAYING
+                    Playing
                   </>
                 ) : (
                   <>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                       <polygon points="5 3 19 12 5 21 5 3"/>
                     </svg>
-                    PLAY ALL
+                    Play All
                   </>
                 )}
               </button>
@@ -126,7 +111,7 @@ const ResultsPage = ({ results, onRestart }) => {
         {tracks.length === 0 ? (
           <div className="no-tracks">
             <p>No tracks found for this mood yet. Try a different combination!</p>
-            <button className="btn btn-outlined" onClick={onRestart}>TRY AGAIN</button>
+            <button className="btn btn-outlined" onClick={onRestart}>Try Again</button>
           </div>
         ) : (
           <div className="tracks-grid">
@@ -140,10 +125,11 @@ const ResultsPage = ({ results, onRestart }) => {
                   className={`track-card ${isCurrentlyPlaying ? 'track-active' : ''}`}
                   key={track?.id ?? idx}
                   onClick={() => handlePlayTrack(idx)}
+                  onMouseEnter={() => onInteraction?.()}
                 >
                   <div className="track-position">
                     {isCurrentlyPlaying ? (
-                      <div className="track-playing-bars">
+                      <div className="track-playing-bars" aria-label="Currently playing">
                         <span style={{ animationPlayState: player.isPlaying ? 'running' : 'paused' }} />
                         <span style={{ animationPlayState: player.isPlaying ? 'running' : 'paused' }} />
                         <span style={{ animationPlayState: player.isPlaying ? 'running' : 'paused' }} />
@@ -171,14 +157,15 @@ const ResultsPage = ({ results, onRestart }) => {
                       handlePlayTrack(idx);
                     }}
                     title="Play this track"
+                    aria-label={`Play ${track?.title ?? 'track'}`}
                   >
                     {isCurrentlyPlaying && player.isPlaying ? (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                         <rect x="6" y="4" width="4" height="16" rx="1"/>
                         <rect x="14" y="4" width="4" height="16" rx="1"/>
                       </svg>
                     ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                         <polygon points="5 3 19 12 5 21 5 3"/>
                       </svg>
                     )}
@@ -192,7 +179,7 @@ const ResultsPage = ({ results, onRestart }) => {
         {/* Bottom Actions */}
         <div className="results-actions">
           <button className="btn btn-outlined" onClick={onRestart}>
-            START OVER
+            Start Over
           </button>
         </div>
       </div>
