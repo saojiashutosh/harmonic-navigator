@@ -111,6 +111,118 @@ function Botanical({ mood, size = 120, color = 'var(--sage)', accent = 'var(--ac
   );
 }
 
+/* ── Orbital loader ──────────────────────────────────────── */
+function OrbitalLoader({ label = 'setting the field…' }) {
+  const cx = 140, cy = 140;
+  const rings = [22, 42, 64, 88, 114];
+  return (
+    <div className="og-orbital-overlay">
+      <svg width="280" height="280" viewBox="0 0 280 280" fill="none" aria-hidden="true">
+        {/* Static dashed rings */}
+        {rings.map((r, i) => (
+          <circle key={r} cx={cx} cy={cy} r={r}
+            stroke="var(--sage)" strokeWidth={i === 0 ? 0.8 : 0.6}
+            strokeDasharray={i % 2 === 0 ? '2 4' : '1 5'}
+            opacity={0.35 + i * 0.04} fill="none" />
+        ))}
+
+        {/* Orbiting dot — ring 1 (fastest) */}
+        <g className="og-orbit-r1">
+          <circle cx={cx + rings[0]} cy={cy} r="3.5" fill="var(--accent)" opacity="0.9" />
+        </g>
+
+        {/* Orbiting dot — ring 2 */}
+        <g className="og-orbit-r2">
+          <circle cx={cx + rings[1]} cy={cy} r="4.5" fill="var(--accent)" opacity="0.75" />
+          <circle cx={cx - rings[1]} cy={cy} r="2.5" fill="var(--sage)" opacity="0.5" />
+        </g>
+
+        {/* Orbiting dots — ring 3 */}
+        <g className="og-orbit-r3">
+          <circle cx={cx + rings[2]} cy={cy} r="5" fill="var(--accent)" opacity="0.7" />
+          <circle cx={cx} cy={cy + rings[2]} r="3" fill="var(--sage)" opacity="0.4" />
+        </g>
+
+        {/* Orbiting dot — ring 4 */}
+        <g className="og-orbit-r4">
+          <circle cx={cx + rings[3]} cy={cy} r="4" fill="var(--accent)" opacity="0.55" />
+          <circle cx={cx - rings[3]} cy={cy} r="2.5" fill="var(--ink-faint)" opacity="0.4" />
+          <circle cx={cx} cy={cy - rings[3]} r="3" fill="var(--sage)" opacity="0.35" />
+        </g>
+
+        {/* Outer asteroid belt */}
+        <g className="og-orbit-belt">
+          {Array.from({ length: 6 }).map((_, i) => {
+            const a = (i / 6) * Math.PI * 2;
+            return <circle key={i}
+              cx={cx + Math.cos(a) * rings[4]}
+              cy={cy + Math.sin(a) * rings[4]}
+              r={i % 2 === 0 ? 3 : 2}
+              fill="var(--accent)" opacity={i % 2 === 0 ? 0.6 : 0.35} />;
+          })}
+        </g>
+
+        {/* Centre sun */}
+        <circle cx={cx} cy={cy} r="9" fill="var(--accent)" opacity="0.95" />
+        <circle cx={cx} cy={cy} r="5" fill="var(--paper)" opacity="0.6" />
+      </svg>
+      <span className="og-orbital-label">{label}</span>
+    </div>
+  );
+}
+
+/* ── Ambient music-reactive background ──────────────────── */
+function AmbientLayer() {
+  const { isPlaying, moodLabel, currentTrack } = usePlayer();
+  const mood = (moodLabel || '').toLowerCase();
+  const live = !!currentTrack && isPlaying;
+  const present = !!currentTrack;
+
+  return (
+    <div className={`og-ambient${present ? (live ? ' is-live' : ' is-idle') : ''}`} aria-hidden="true">
+      {/* Soft gradient orbs — always float when a track is loaded */}
+      <span className="ogab ogab-1" />
+      <span className="ogab ogab-2" />
+      <span className="ogab ogab-3" />
+
+      {/* Celebratory: orbiting rings + travelling dots */}
+      {mood === 'celebratory' && <>
+        <span className="ogab-ring ogab-ring-1" />
+        <span className="ogab-ring ogab-ring-2" />
+        <span className="ogab-ring ogab-ring-3" />
+        {[180, 280, 380].map((r, i) => (
+          <span key={r}
+            className={`ogab-orb-arm${i % 2 ? ' ogab-rev' : ''}`}
+            style={{ '--r': `${r}px`, '--spd': `${22 + i * 12}s` }}>
+            <span className="ogab-dot" style={{ '--dot-r': i % 2 === 0 ? '6px' : '4px' }} />
+          </span>
+        ))}
+      </>}
+
+      {/* Energized: expanding pulse rings */}
+      {mood === 'energized' && <>
+        {[0, 1, 2, 3].map(i => (
+          <span key={i} className="ogab-pulse" style={{ '--d': `${i * 0.9}s` }} />
+        ))}
+      </>}
+
+      {/* Calm: very slow large breathing blob */}
+      {mood === 'calm' && <span className="ogab-calm-blob" />}
+
+      {/* Melancholic: slow diagonal rain streaks */}
+      {mood === 'melancholic' && Array.from({ length: 8 }).map((_, i) => (
+        <span key={i} className="ogab-streak" style={{ '--x': `${10 + i * 12}%`, '--d': `${i * 0.7}s` }} />
+      ))}
+
+      {/* Focused: breathing concentric rings */}
+      {mood === 'focused' && <>
+        <span className="ogab-focus-ring ogab-focus-1" />
+        <span className="ogab-focus-ring ogab-focus-2" />
+      </>}
+    </div>
+  );
+}
+
 /* ── Backdrop with grain + arcs ──────────────────────────── */
 function PaperBackdrop() {
   return (
@@ -151,37 +263,98 @@ function Header({ onHome, view }) {
   );
 }
 
+/* ── Hero preview card ───────────────────────────────────── */
+const PREVIEW_TRACKS = [
+  { id: 'prev-1', title: 'Blinding Lights', artistId: { name: 'The Weeknd' }, durationMinutes: '3:22', language: 'english' },
+  { id: 'prev-2', title: 'APT', artistId: { name: 'Rose' }, durationMinutes: '2:58', language: 'english' },
+  { id: 'prev-3', title: 'Levitating', artistId: { name: 'Dua Lipa' }, durationMinutes: '3:23', language: 'english' },
+  { id: 'prev-4', title: 'Flowers', artistId: { name: 'Miley Cyrus' }, durationMinutes: '3:21', language: 'english' },
+  { id: 'prev-5', title: 'Anti-Hero', artistId: { name: 'Taylor Swift' }, durationMinutes: '3:21', language: 'english' },
+];
+
+function HeroPreviewCard() {
+  const { loadPlaylist, jumpTo, queue, currentTrack, isPlaying } = usePlayer();
+
+  const handlePlay = (idx = 0) => {
+    if (queue.length > 0 && queue[0].id === PREVIEW_TRACKS[0].id) {
+      jumpTo(idx);
+    } else {
+      loadPlaylist(PREVIEW_TRACKS, idx, 'celebratory', '#C26F3C');
+    }
+  };
+
+  return (
+    <div className="og-hero-right">
+      <div className="og-preview-card">
+        <div className="og-pc-header">
+          <div className="og-pc-sigil">
+            <MoodSigil mood="celebratory" drawIn={false} size={64} />
+          </div>
+          <div className="og-pc-meta">
+            <div className="og-pc-mood">celebratory.</div>
+            <div className="og-pc-badge">your reading · sample</div>
+          </div>
+          <div className="og-pc-conf">93%</div>
+        </div>
+        <div className="og-pc-tracks">
+          {PREVIEW_TRACKS.map((t, i) => {
+            const active = currentTrack?.id === t.id;
+            return (
+              <button key={t.id} className={`og-pc-track${active ? ' is-active' : ''}`} onClick={() => handlePlay(i)}>
+                <span className="og-pc-tn">{String(i + 1).padStart(2, '0')}</span>
+                <div className="og-pc-track-info">
+                  <span className="og-pc-tt">{t.title}{active && <em> · {isPlaying ? '▶' : '❚❚'}</em>}</span>
+                  <span className="og-pc-ta">{t.artistId.name}</span>
+                </div>
+                <span className="og-pc-td">{t.durationMinutes}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="og-pc-footer">
+          <div className="og-pc-stats">
+            <dl className="og-pc-stat"><dt>match</dt><dd>93%</dd></dl>
+            <dl className="og-pc-stat"><dt>tracks</dt><dd>15</dd></dl>
+            <dl className="og-pc-stat"><dt>length</dt><dd>~60m</dd></dl>
+          </div>
+          <button className="og-pc-play" onClick={() => handlePlay(0)}>▶</button>
+        </div>
+      </div>
+      <div className="og-pc-float-1" aria-hidden="true"><Botanical mood="calm" size={72} /></div>
+      <div className="og-pc-float-2" aria-hidden="true"><Botanical mood="focused" size={56} /></div>
+    </div>
+  );
+}
+
 /* ── Landing ─────────────────────────────────────────────── */
 function Landing({ onStart }) {
   return (
     <div className="og-landing">
       <div className="og-hero">
-        <div className="og-hero-tag"><span className="og-hero-dot" />A field of feeling, est. 2026</div>
-        <h1>
-          <span>music for</span>
-          <em>the weather</em>
-          <span>inside.</span>
-        </h1>
-        <p>Tell us about the air today. We&rsquo;ll find a small handful of songs to keep you company through the next hour.</p>
-        <div className="og-hero-cta">
-          <button className="og-btn og-btn-primary" onClick={onStart}>
-            <span>Tend to a session</span>
-            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M4 10 L16 10 M11 5 L16 10 L11 15" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
-          <span className="og-hero-aside">~ 3 min · no account · 10 tracks</span>
+        <div className="og-hero-left">
+          <div className="og-hero-tag"><span className="og-hero-dot" />A field of feeling, est. 2026</div>
+          <h1>
+            <span>music for</span>
+            <em>the weather</em>
+            <span>inside.</span>
+          </h1>
+          <p>Tell us about the air today. We&rsquo;ll find a small handful of songs to keep you company through the next hour.</p>
+          <div className="og-hero-cta">
+            <button className="og-btn og-btn-primary" onClick={onStart}>
+              <span>Tend to a session</span>
+              <svg width="20" height="20" viewBox="0 0 20 20"><path d="M4 10 L16 10 M11 5 L16 10 L11 15" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            <span className="og-hero-aside">~ 3 min · no account · 15 tracks</span>
+          </div>
         </div>
-        <div className="og-hero-botanicals" aria-hidden="true">
-          <Botanical mood="calm" size={88} />
-          <Botanical mood="focused" size={88} />
-          <Botanical mood="celebratory" size={88} />
-        </div>
+        <HeroPreviewCard />
       </div>
 
       <div className="og-three">
         {[
           { n: 'one', t: 'A small conversation', d: 'Seven gentle questions, on a single page. Your words, your weather.', e: 0.3, m: 'calm' },
           { n: 'two', t: 'A reading of the room', d: 'We listen for the shape — energy, intent, the colour of the hour.', e: 0.55, m: 'focused' },
-          { n: 'three', t: 'A hand-tied bouquet', d: 'Eight to ten tracks. Picked, not generated. Press play, or browse.', e: 0.85, m: 'celebratory' },
+          { n: 'three', t: 'A hand-tied bouquet', d: 'Ten to fifteen tracks. Picked, not generated. Press play, or browse.', e: 0.85, m: 'celebratory' },
         ].map((s, i) => (
           <div key={i} className="og-step">
             <span className="og-step-num">{s.n}.</span>
@@ -239,13 +412,27 @@ function MoodCard({ onComplete }) {
     return () => { cancelled = true; };
   }, []);
 
-  const select = (k, v) => {
-    setAnswers(p => ({ ...p, [k]: v }));
-    setBleedKey(`${k}-${v}-${Date.now()}`);
+  const select = (q, v) => {
+    if (q.inputType === 'multi_select') {
+      setAnswers(p => {
+        const cur = Array.isArray(p[q.key]) ? p[q.key] : [];
+        const next = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v];
+        return { ...p, [q.key]: next };
+      });
+    } else {
+      setAnswers(p => ({ ...p, [q.key]: v }));
+    }
+    setBleedKey(`${q.key}-${v}-${Date.now()}`);
   };
   const total = questions.length || 1;
-  const answered = Object.keys(answers).length;
-  const ready = answered >= total;
+  const answered = Object.entries(answers).filter(([, v]) =>
+    Array.isArray(v) ? v.length > 0 : v !== undefined
+  ).length;
+  // Only single-select questions are mandatory; text and multi_select are optional
+  const selectRequired = questions.filter(q => q.inputType === 'select');
+  const selectAnswered = selectRequired.filter(q => answers[q.key] !== undefined).length;
+  const ready = selectRequired.length > 0 && selectAnswered >= selectRequired.length;
+  const remaining = selectRequired.length - selectAnswered;
 
   const submit = async () => {
     if (submittedRef.current) return;
@@ -254,14 +441,14 @@ function MoodCard({ onComplete }) {
     closePlayer();
     try {
       const inf = await API.submitAnswers(sessionId, answers);
-      const pl = await API.generatePlaylist(inf.moodSessionId, 10);
+      const pl = await API.generatePlaylist(inf.moodSessionId, 15);
       const tracks = await API.fetchPlaylistTracks(pl.id);
       onComplete({ moodLabel: inf.moodLabel, confidence: inf.confidence, tracks: tracks.map(t => t.track) });
     } catch (err) { setError('Failed: ' + err.message); setSubmitting(false); submittedRef.current = false; }
   };
 
-  if (loading) return <div className="og-loading"><Waveform energy={0.3} width={140} height={28} color="var(--accent)" strokeWidth={1.6} /><p>setting the field…</p></div>;
-  if (submitting) return <div className="og-loading"><Botanical mood="celebratory" size={120} /><p>tying the bouquet…</p></div>;
+  if (loading) return <OrbitalLoader label="setting the field…" />;
+  if (submitting) return <OrbitalLoader label="tying the bouquet…" />;
   if (error) return <div className="og-loading"><p>{error}</p></div>;
 
   return (
@@ -280,7 +467,7 @@ function MoodCard({ onComplete }) {
             <span className="og-rail-count">{answered} of {total}</span>
           </div>
           <button className="og-btn og-btn-primary og-rail-cta" onClick={ready ? submit : undefined} disabled={!ready}>
-            {ready ? 'make my bouquet →' : `${total - answered} to go`}
+            {ready ? 'make my bouquet →' : `${remaining} to go`}
           </button>
           <div className="og-rail-illus" aria-hidden="true">
             <Botanical mood={answered === 0 ? 'calm' : answered < total ? 'focused' : 'celebratory'} size={150} />
@@ -309,29 +496,41 @@ function MoodCard({ onComplete }) {
                 </button>
               </div>
             ) : (
-              <div className="og-options">
-                {(q.options || []).map(opt => {
-                  const active = answers[q.key] === opt.rawValue;
-                  const bleed = bleedKey && bleedKey.startsWith(`${q.key}-${opt.rawValue}-`);
-                  return (
-                    <button key={opt.rawValue} className={`og-option ${active ? 'is-active' : ''} ${bleed ? 'is-bleeding' : ''}`} onClick={() => select(q.key, opt.rawValue)}>
-                      <span className="og-bleed" aria-hidden="true" />
-                      <div className="og-option-wave-frame">
-                        <Waveform energy={HS.getEnergy(opt.rawValue)} width={80} height={26} color={active ? 'var(--accent)' : 'var(--sage)'} strokeWidth={active ? 1.6 : 1.3} />
-                      </div>
-                      <div className="og-option-text">
-                        <span className="og-option-label">{opt.label.toLowerCase()}</span>
-                        <span className="og-option-copy">{HS.copyFor(opt.rawValue).toLowerCase()}</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              <>
+                {q.inputType === 'multi_select' && (
+                  <p className="og-multi-hint">select all that apply</p>
+                )}
+                <div className="og-options">
+                  {(q.options || []).map(opt => {
+                    const active = q.inputType === 'multi_select'
+                      ? Array.isArray(answers[q.key]) && answers[q.key].includes(opt.rawValue)
+                      : answers[q.key] === opt.rawValue;
+                    const bleed = bleedKey && bleedKey.startsWith(`${q.key}-${opt.rawValue}-`);
+                    return (
+                      <button key={opt.rawValue} className={`og-option ${active ? 'is-active' : ''} ${bleed ? 'is-bleeding' : ''}`} onClick={() => select(q, opt.rawValue)}>
+                        <span className="og-bleed" aria-hidden="true" />
+                        <div className="og-option-wave-frame">
+                          <Waveform energy={HS.getEnergy(opt.rawValue)} width={80} height={26} color={active ? 'var(--accent)' : 'var(--sage)'} strokeWidth={active ? 1.6 : 1.3} />
+                        </div>
+                        <div className="og-option-text">
+                          <span className="og-option-label">{opt.label.toLowerCase()}</span>
+                          <span className="og-option-copy">{HS.copyFor(opt.rawValue).toLowerCase()}</span>
+                        </div>
+                        {q.inputType === 'multi_select' && (
+                          <span className={`og-multi-check ${active ? 'is-checked' : ''}`} aria-hidden="true">
+                            {active ? '✓' : '○'}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </section>
         ))}
         <button className="og-btn og-btn-primary og-end-cta" onClick={ready ? submit : undefined} disabled={!ready}>
-          {ready ? 'make my bouquet →' : `${total - answered} to go`}
+          {ready ? 'make my bouquet →' : `${remaining} to go`}
         </button>
       </div>
     </div>
@@ -339,10 +538,10 @@ function MoodCard({ onComplete }) {
 }
 
 /* ── Mood sigil — the hand-drawn glyph that draws itself in ─── */
-function MoodSigil({ mood, drawIn = true }) {
+function MoodSigil({ mood, drawIn = true, size }) {
   const m = (mood || 'calm').toLowerCase();
   const cls = `og-sigil ${drawIn ? 'is-drawing' : ''}`;
-  const baseProps = { viewBox: '0 0 240 240', className: cls, 'aria-hidden': 'true' };
+  const baseProps = { viewBox: '0 0 240 240', className: cls, 'aria-hidden': 'true', ...(size ? { width: size, height: size } : {}) };
 
   const wrap = (children) => (
     <svg {...baseProps}>
@@ -363,12 +562,14 @@ function MoodSigil({ mood, drawIn = true }) {
 
   if (m === 'energized') return wrap(<>
     <circle className="og-stroke" cx="120" cy="120" r="22" pathLength="100" />
-    {Array.from({ length: 12 }).map((_, i) => {
-      const a = (i / 12) * Math.PI * 2;
-      return <line key={i} className="og-stroke" pathLength="100"
-        x1={120 + Math.cos(a) * 36} y1={120 + Math.sin(a) * 36}
-        x2={120 + Math.cos(a) * 80} y2={120 + Math.sin(a) * 80} />;
-    })}
+    <g style={{ transformOrigin: '120px 120px', animation: 'ogOrbit 16s linear infinite' }}>
+      {Array.from({ length: 12 }).map((_, i) => {
+        const a = (i / 12) * Math.PI * 2;
+        return <line key={i} className="og-stroke" pathLength="100"
+          x1={120 + Math.cos(a) * 36} y1={120 + Math.sin(a) * 36}
+          x2={120 + Math.cos(a) * 80} y2={120 + Math.sin(a) * 80} />;
+      })}
+    </g>
     <circle cx="120" cy="120" r="9" fill="var(--accent)" stroke="none" />
   </>);
 
@@ -444,7 +645,6 @@ function Results({ results, onRestart }) {
   return (
     <div className="og-results">
       <div className="og-r-left">
-        <div className="og-sigil-frame"><MoodSigil mood={results?.moodLabel} drawIn={true} /></div>
         <span className="og-eyebrow">your reading</span>
         <h1>{meta.label.toLowerCase()}.</h1>
         <p>{meta.desc}</p>
@@ -481,16 +681,17 @@ function Results({ results, onRestart }) {
 function PlayerStrip() {
   const { currentTrack: track, queue, currentIndex, isPlaying, togglePlay, playNext, playPrevious, closePlayer, moodLabel, progress, seekTo } = usePlayer();
 
-  if (!track || !queue.length) return null;
-  
-  const meta = HS.moodLabel === 'anxious' ? HS.moodMeta('calm') : HS.moodMeta(moodLabel); // default to something if unknown
   const [tick, setTick] = useState(0);
-  
+
   useEffect(() => {
     if (!isPlaying) return;
     const id = setInterval(() => setTick(t => t + 1), 60);
     return () => clearInterval(id);
   }, [isPlaying]);
+
+  if (!track || !queue.length) return null;
+
+  const meta = HS.moodMeta(moodLabel);
 
   const waveW = 220, waveH = 26, waveMid = waveH / 2, n = 44;
 
@@ -565,6 +766,7 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
   
   return (
     <div className={`og-shell density-${density} palette-${palette} type-${typeStyle}`}>
+      <AmbientLayer />
       <PaperBackdrop />
       <Header view={view} onHome={() => { setView('home'); setResults(null); }} />
       <main className={`og-main view-${view}`}>

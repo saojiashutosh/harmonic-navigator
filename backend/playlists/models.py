@@ -125,7 +125,7 @@ class PlaylistTrack(HarmonicBaseModel):
         verbose_name=_("relevance score"),
         db_column="relevance_score",
         null=True,
-        validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
+        validators=[MinValueValidator(0.0), MaxValueValidator(4.0)],
     )
 
     playState = models.CharField(
