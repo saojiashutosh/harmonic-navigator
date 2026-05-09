@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
+import random
+import re
 from django.db import transaction
 from django.db.models import Q
 
 from feedback.models import TrackMoodScore, UserMoodPreference
 from moods.constants import MUSIC_PREFERENCE_OVERRIDES
 from moods.models import MoodInference, MoodSession
-from tracks.models import Track
+from tracks.models import Track, TrackMoodTag
 
 from .constants import DEFAULT_PLAYLIST_SIZE, MOOD_TYPE_RATIOS, TARGET_TRACK_ATTRIBUTES
 from .models import Playlist, PlaylistTrack
@@ -31,6 +34,7 @@ def build_playlist_for_session(
     music_style = answer_map.get("music_style")
     playlist_goal = answer_map.get("playlist_goal")
     preferred_artist = answer_map.get("preferred_artist")
+    era_preference = answer_map.get("music_era")
     type_weights = _resolve_type_weights(
         user_id=session.userId_id,
         mood_label=inference.moodLabel,
@@ -43,17 +47,25 @@ def build_playlist_for_session(
 
     candidate_tracks = _build_candidate_pool(
         mood_label=inference.moodLabel,
+        secondary_mood=secondary_mood,
         social_setting=social_setting,
         music_preference=music_preference,
         music_language=music_language,
         music_style=music_style,
         preferred_artist=preferred_artist,
+        era_preference=era_preference,
         limit=limit,
     )
     feedback_map = _feedback_score_map(
         user_id=session.userId_id,
         mood_label=inference.moodLabel,
         tracks=candidate_tracks,
+    )
+    # Pre-build a set of track IDs that have a matching mood tag for each mood —
+    # avoids N+1 queries inside the scoring loop.
+    mood_tag_ids = _mood_tag_track_ids(
+        tracks=candidate_tracks,
+        moods={inference.moodLabel, secondary_mood} - {None},
     )
 
     scored_tracks = []
@@ -69,27 +81,49 @@ def build_playlist_for_session(
             music_style=music_style,
             playlist_goal=playlist_goal,
             preferred_artist=preferred_artist,
+            era_preference=era_preference,
             feedback_map=feedback_map,
+            mood_tag_ids=mood_tag_ids,
         )
         scored_tracks.append((track, relevance_score))
 
     scored_tracks.sort(key=lambda item: item[1], reverse=True)
 
+    # ── Deduplicate by base title (strip Remix/Lofi/From… variants) ───
+    seen_base: set[str] = set()
+    deduped: list = []
+    for track, score in scored_tracks:
+        bt = _base_title(track.title)
+        if bt in seen_base:
+            continue
+        seen_base.add(bt)
+        deduped.append((track, score))
+    scored_tracks = deduped
+
     # ── Secondary mood diversity mixing ───────────────────────────────
-    # When blend ratio < 1.0, reserve a portion of slots for secondary-mood tracks.
+    # When blend ratio < 1.0, reserve slots for secondary-mood tracks.
+    # We use a loose match: tracks whose primaryMood OR a mood tag matches
+    # the secondary mood, so we don't depend on primaryMood being set correctly.
     if secondary_mood and mood_blend_ratio < 1.0:
         diversity_slots = max(1, int(limit * (1 - mood_blend_ratio) * 0.4))
-        primary_tracks = [t for t in scored_tracks if t[0].primaryMood == inference.moodLabel]
-        secondary_tracks = [
-            t for t in scored_tracks
-            if t[0].primaryMood == secondary_mood
-            and t not in primary_tracks
-        ]
-        # Take top primary, then interleave some secondary
+        secondary_tag_ids = mood_tag_ids.get(secondary_mood, set())
+        primary_set = {
+            t for t, _ in scored_tracks
+            if t.primaryMood == inference.moodLabel
+            or str(t.id) in mood_tag_ids.get(inference.moodLabel, set())
+        }
+        secondary_set = {
+            t for t, _ in scored_tracks
+            if (
+                t.primaryMood == secondary_mood
+                or str(t.id) in secondary_tag_ids
+            ) and t not in primary_set
+        }
+        primary_tracks = [(t, s) for t, s in scored_tracks if t in primary_set]
+        secondary_tracks = [(t, s) for t, s in scored_tracks if t in secondary_set]
         primary_take = primary_tracks[: limit - diversity_slots]
         secondary_take = secondary_tracks[:diversity_slots]
         chosen_tracks = primary_take + secondary_take
-        # Re-sort by score for final ordering
         chosen_tracks.sort(key=lambda item: item[1], reverse=True)
         chosen_tracks = chosen_tracks[:limit]
     else:
@@ -128,57 +162,77 @@ def build_playlist_for_session(
 def _build_candidate_pool(
     *,
     mood_label: str,
+    secondary_mood: str | None = None,
     social_setting: str | None,
     music_preference: str | None,
     music_language: str | None,
     music_style: str | None,
     preferred_artist: str | None,
+    era_preference: str | None = None,
     limit: int,
 ) -> list[Track]:
     base_qs = Track.objects.select_related("artistId").filter(isActive=True)
     if social_setting in {"kids", "meeting"}:
         base_qs = base_qs.filter(isExplicit=False)
 
-    mood_q = Q(primaryMood=mood_label) if mood_label else Q()
+    # Match mood via primaryMood field OR via TrackMoodTag relationship so
+    # tracks with missing/incorrect primaryMood still surface when tagged.
+    def _mood_q(label: str) -> Q:
+        if not label:
+            return Q()
+        return Q(primaryMood=label) | Q(track_mood_tags__moodTagId__mood=label)
+
+    mood_q = _mood_q(mood_label)
+    secondary_mood_q = _mood_q(secondary_mood) if secondary_mood else Q()
+    any_mood_q = mood_q | secondary_mood_q if secondary_mood else mood_q
+
     language_q = _language_query(music_language)
     style_q = _style_query(music_style)
     type_q = _type_query(music_preference)
     artist_q = _artist_query(preferred_artist)
+    era_q = _era_query(era_preference)
 
     pool_size = max(limit * 25, 250)
     slice_size = max(limit * 8, 50)
     queries = [
-        # 1. Best match: all filters
-        artist_q & language_q & style_q & type_q & mood_q,
-        # 2-3. Artist combos
+        # 1. Best match: all filters including era
+        artist_q & language_q & style_q & type_q & mood_q & era_q,
+        # 2. Era + language + mood (no style)
+        era_q & language_q & mood_q & type_q,
+        # 3-4. Artist combos
         artist_q & language_q & type_q,
         artist_q & style_q & type_q,
-        # 4-5. Language + style/mood combos
+        # 5-6. Language + style/mood combos
         language_q & style_q & type_q & mood_q,
         language_q & style_q & type_q,
-        # 6-8. Partial combos prioritising language
-        artist_q & mood_q,
+        # 7-9. Partial combos prioritising language
+        artist_q & any_mood_q,
         language_q & mood_q & type_q,
-        language_q & mood_q,           # language + mood, relax type
+        language_q & any_mood_q,
         language_q & type_q,
-        # 9. Language only — always return tracks in the requested language
+        # 10. Language only
         language_q,
-        # 10-11. Style/type fallbacks (language wasn't available)
+        # 11-13. Style / mood fallbacks
         style_q & mood_q & type_q,
         style_q & type_q,
-        mood_q & type_q,
-        # 12-14. Bare fallbacks
+        any_mood_q & type_q,
+        # 14-17. Bare fallbacks
         artist_q,
         type_q,
-        mood_q,
+        any_mood_q,
         Q(),
     ]
 
     selected: list[Track] = []
     seen_ids: set[str] = set()
     for query in queries:
-        queryset = base_qs if query == Q() else base_qs.filter(query)
-        for track in queryset[:slice_size]:
+        # Use distinct() because mood-tag JOINs can produce duplicate rows.
+        queryset = base_qs if query == Q() else base_qs.filter(query).distinct()
+        # Shuffle the batch so the candidate pool varies across sessions —
+        # without this, DB insertion order always produces the same pool.
+        track_batch = list(queryset[:slice_size])
+        random.shuffle(track_batch)
+        for track in track_batch:
             track_id = str(track.id)
             if track_id in seen_ids:
                 continue
@@ -188,6 +242,31 @@ def _build_candidate_pool(
                 return selected
 
     return selected
+
+
+def _mood_tag_track_ids(
+    *,
+    tracks: list[Track],
+    moods: set[str],
+) -> dict[str, set[str]]:
+    """Return {mood_label: {track_id_str, ...}} for all matching TrackMoodTag rows.
+
+    Done in a single query to avoid N+1 inside the scoring loop.
+    """
+    if not tracks or not moods:
+        return {}
+
+    track_ids = [t.id for t in tracks]
+    rows = TrackMoodTag.objects.filter(
+        trackId_id__in=track_ids,
+        moodTagId__mood__in=moods,
+    ).values_list("trackId_id", "moodTagId__mood")
+
+    result: dict[str, set[str]] = {m: set() for m in moods}
+    for track_id, mood in rows:
+        if mood in result:
+            result[mood].add(str(track_id))
+    return result
 
 
 def _feedback_score_map(*, user_id, mood_label: str, tracks: list[Track]) -> dict[str, float]:
@@ -233,20 +312,28 @@ def _score_track(
     music_style: str | None,
     playlist_goal: str | None,
     preferred_artist: str | None,
+    era_preference: str | None = None,
     feedback_map: dict[str, float],
+    mood_tag_ids: dict[str, set[str]] | None = None,
 ) -> float:
     score = 0.0
+    track_id_str = str(track.id)
+    mood_tag_ids = mood_tag_ids or {}
 
-    # ── Primary mood match ────────────────────────────────────────────
-    if track.primaryMood == mood_label:
-        score += 0.30
+    primary_tag_ids = mood_tag_ids.get(mood_label, set())
+    secondary_tag_ids = mood_tag_ids.get(secondary_mood, set()) if secondary_mood else set()
+
+    # ── Primary mood match (primaryMood field OR mood tag) ────────────
+    if track.primaryMood == mood_label or track_id_str in primary_tag_ids:
+        score += 0.50
     elif track.primaryMood:
         score += 0.04
 
     # ── Secondary mood bonus ──────────────────────────────────────────
-    if secondary_mood and track.primaryMood == secondary_mood:
-        # Scale bonus inversely with blend ratio — stronger when moods are close
-        secondary_bonus = 0.18 * (1.0 - mood_blend_ratio)
+    if secondary_mood and (
+        track.primaryMood == secondary_mood or track_id_str in secondary_tag_ids
+    ):
+        secondary_bonus = 0.20 * (1.0 - mood_blend_ratio)
         score += secondary_bonus
 
     score += type_weights.get(track.type, 0.0) * 0.18
@@ -273,11 +360,20 @@ def _score_track(
         preferred_artist=preferred_artist,
     )
 
-    feedback_score = feedback_map.get(str(track.id))
+    score += _era_score(track=track, era_preference=era_preference)
+
+    feedback_score = feedback_map.get(track_id_str)
     if feedback_score is not None:
         score += feedback_score * 0.20
 
-    return round(min(max(score, 0.0), 1.5), 4)
+    # Small random jitter breaks ties between tracks with nearly equal scores,
+    # ensuring playlist variety across sessions with identical preferences.
+    score += random.uniform(-0.04, 0.04)
+
+    # Cap raised from 1.5 → 4.0: the real max score (mood + language + style +
+    # era + lyrics) is ~2.3, so 1.5 was clipping everything and making all
+    # qualifying tracks score identically, which killed sort differentiation.
+    return round(min(max(score, 0.0), 4.0), 4)
 
 
 def _taste_score(
@@ -296,31 +392,58 @@ def _taste_score(
     classical_form = _normalise(track.classicalForm)
     artist_name = _normalise(getattr(track.artistId, "name", ""))
 
-    requested_language = _normalise(music_language)
-    if requested_language and requested_language != "no_preference":
-        if requested_language == "instrumental" and track.isInstrumental:
-            score += 0.50
-        elif requested_language == language:
-            score += 0.55
-        elif requested_language == "hindi" and genre == "bollywood":
-            score += 0.40
-        else:
-            score -= 0.25
+    requested_languages = _parse_language_pref(music_language)
+    if requested_languages:
+        matched_lang = False
+        for lang in requested_languages:
+            if lang == "instrumental" and track.isInstrumental:
+                score += 0.50
+                matched_lang = True
+                break
+            elif lang == language:
+                score += 0.55
+                matched_lang = True
+                break
+            elif lang == "hindi" and (genre == "bollywood" or genre == "desi" or region == "india"):
+                score += 0.40
+                matched_lang = True
+                break
+            elif lang == "marathi" and (genre == "marathi" or region == "maharashtra"):
+                score += 0.40
+                matched_lang = True
+                break
+        if not matched_lang:
+            # Hard penalty: user explicitly requested a language — tracks that
+            # don't match it should rank far below matching ones.
+            score -= 0.55
 
     requested_style = _normalise(music_style)
     if requested_style and requested_style != "no_preference":
         if requested_style == genre:
             score += 0.40
-        elif requested_style == "bollywood" and (language == "hindi" or region == "india"):
+        elif requested_style == "bollywood" and (language == "hindi" or genre == "bollywood" or region == "india"):
             score += 0.36
-        elif requested_style == "hollywood" and language == "english":
+        elif requested_style == "hollywood" and (language == "english" or region in {"us", "uk"}):
             score += 0.30
-        elif requested_style == "classical" and classical_form:
+        elif requested_style == "classical" and (classical_form or genre == "classical"):
             score += 0.34
         elif requested_style == "raga" and (raga_name or genre == "raga"):
             score += 0.36
+        elif requested_style == "marathi" and (language == "marathi" or region == "maharashtra" or genre == "marathi"):
+            score += 0.36
+        elif requested_style == "instrumental" and (track.isInstrumental or track.type != Track.TypeChoices.SONG):
+            score += 0.36
+        elif requested_style == "lofi" and genre in {"lo-fi", "lofi", "chill", "ambient"}:
+            score += 0.32
+        elif requested_style == "indie" and genre in {"indie", "indie-pop", "alternative"}:
+            score += 0.30
+        elif requested_style == "pop" and genre in {"pop", "dance-pop", "synth-pop"}:
+            score += 0.30
+        elif requested_style == "devotional" and genre in {"devotional", "spiritual", "bhajan"}:
+            score += 0.36
         else:
-            score -= 0.10
+            # Explicit style mismatch penalty
+            score -= 0.25
 
     requested_goal = _normalise(playlist_goal)
     if requested_goal == "focus" and track.primaryMood == "focused":
@@ -339,7 +462,9 @@ def _taste_score(
         if artist_query in artist_name:
             score += 0.75
         else:
-            score -= 0.15
+            # Small penalty only — the artist preference is a bonus, not an
+            # eliminator; other well-matched tracks should still appear.
+            score -= 0.05
 
     if track.artistPopularity is not None:
         score += min(track.artistPopularity / 100, 1.0) * 0.05
@@ -347,15 +472,71 @@ def _taste_score(
     return score
 
 
-def _language_query(music_language: str | None) -> Q:
-    requested_language = _normalise(music_language)
-    if not requested_language or requested_language == "no_preference":
+def _era_score(*, track: Track, era_preference: str | None) -> float:
+    if not era_preference or era_preference == "no_preference":
+        return 0.0
+    year = track.releaseYear
+    if year is None:
+        # Unknown release year — always penalise so confirmed-era tracks rank higher
+        return -0.20
+    if era_preference == "latest" and year >= 2024:
+        return 0.45
+    if era_preference == "recent" and 2020 <= year <= 2023:
+        return 0.42
+    if era_preference == "era_2010s" and 2010 <= year <= 2019:
+        return 0.38
+    if era_preference == "era_2000s" and 2000 <= year <= 2009:
+        return 0.38
+    if era_preference == "nineties" and year < 2000:
+        return 0.40
+    # Wrong era — soft penalty so a great mood match can still appear
+    return -0.22
+
+
+def _era_query(era_preference: str | None) -> Q:
+    if not era_preference or era_preference == "no_preference":
         return Q()
-    if requested_language == "instrumental":
-        return Q(isInstrumental=True) | ~Q(type=Track.TypeChoices.SONG)
-    if requested_language == "hindi":
-        return Q(language__iexact="hindi") | Q(genre__icontains="bollywood") | Q(region__iexact="india")
-    return Q(language__iexact=requested_language)
+    if era_preference == "latest":
+        return Q(releaseYear__gte=2024)
+    if era_preference == "recent":
+        return Q(releaseYear__gte=2020, releaseYear__lte=2023)
+    if era_preference == "era_2010s":
+        return Q(releaseYear__gte=2010, releaseYear__lte=2019)
+    if era_preference == "era_2000s":
+        return Q(releaseYear__gte=2000, releaseYear__lte=2009)
+    if era_preference == "nineties":
+        return Q(releaseYear__lt=2000) | Q(releaseYear__isnull=True)
+    return Q()
+
+
+def _parse_language_pref(raw_value: str | None) -> list[str]:
+    """Parse music_language rawValue — plain string or JSON array — into a normalised list."""
+    if not raw_value:
+        return []
+    try:
+        parsed = json.loads(raw_value)
+        if isinstance(parsed, list):
+            return [v.strip().lower() for v in parsed if v and v.strip().lower() != "no_preference"]
+        val = str(parsed).strip().lower()
+        return [val] if val and val != "no_preference" else []
+    except (json.JSONDecodeError, TypeError):
+        val = raw_value.strip().lower()
+        return [val] if val and val != "no_preference" else []
+
+
+def _language_query(music_language: str | None) -> Q:
+    languages = _parse_language_pref(music_language)
+    if not languages:
+        return Q()
+    combined = Q()
+    for lang in languages:
+        if lang == "instrumental":
+            combined |= Q(isInstrumental=True) | ~Q(type=Track.TypeChoices.SONG)
+        elif lang == "hindi":
+            combined |= Q(language__iexact="hindi") | Q(genre__icontains="bollywood") | Q(region__iexact="india")
+        else:
+            combined |= Q(language__iexact=lang)
+    return combined
 
 
 def _style_query(music_style: str | None) -> Q:
@@ -370,6 +551,10 @@ def _style_query(music_style: str | None) -> Q:
         return Q(classicalForm__isnull=False) & ~Q(classicalForm="")
     if requested_style == "raga":
         return (Q(ragaName__isnull=False) & ~Q(ragaName="")) | Q(genre__icontains="raga")
+    if requested_style == "marathi":
+        return Q(language__iexact="marathi") | Q(region__icontains="maharashtra") | Q(genre__icontains="marathi")
+    if requested_style == "instrumental":
+        return Q(isInstrumental=True) | Q(type__in=[Track.TypeChoices.INSTRUMENTAL, Track.TypeChoices.AMBIENT])
     return Q(genre__iexact=requested_style) | Q(genre__icontains=requested_style)
 
 
@@ -397,6 +582,21 @@ def _artist_query(preferred_artist: str | None) -> Q:
 
 def _normalise(value: str | None) -> str:
     return (value or "").strip().lower().replace(" ", "_")
+
+
+_PAREN_RE = re.compile(r'\s*[\(\[\{][^\)\]\}]*[\)\]\}]')
+_SUFFIX_RE = re.compile(
+    r'\s*[-–]\s*(remix|remaster(?:ed)?|live|acoustic|lo.?fi|reprise|version|cover|'
+    r'edit|extended|radio\s+edit|instrumental|from\s+.+)$',
+    flags=re.IGNORECASE,
+)
+
+
+def _base_title(title: str) -> str:
+    """Strip parenthetical/suffix variants so (Remix) and (Lofi) don't both appear."""
+    t = _PAREN_RE.sub('', title)
+    t = _SUFFIX_RE.sub('', t)
+    return t.strip().lower()
 
 
 def _selection_reason(*, track: Track, mood_label: str, music_preference: str | None) -> str:
