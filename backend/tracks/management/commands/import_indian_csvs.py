@@ -20,7 +20,18 @@ MOOD_RULES = [
     (0.30, 0.70, 0.30, 0.70, "focused"),
 ]
 
-def infer_mood(energy: float, valence: float) -> str:
+def infer_mood(energy: float, valence: float, language: str = '') -> str:
+    lang = language.lower().strip()
+    if lang == 'english':
+        if energy >= 0.75 and valence >= 0.65:
+            return "celebratory"
+        if energy >= 0.65:
+            return "energized"
+        if energy <= 0.40 and valence >= 0.45:
+            return "calm"
+        if energy <= 0.50 and valence <= 0.35:
+            return "melancholic"
+        return "focused"
     for e_min, e_max, v_min, v_max, label in MOOD_RULES:
         if e_min <= energy <= e_max and v_min <= valence <= v_max:
             return label
@@ -86,7 +97,23 @@ class Command(BaseCommand):
                     tempo_int = int(tempo) if tempo else None
                     loudness = safe_float(row.get("loudness"))
                     acousticness = safe_float(row.get("acousticness"))
-                    language = row.get("language", "").strip() or None
+                    language = (row.get("language", "").strip().lower() or None)
+
+                    # CSVs use either "release_year" (integer) or "released_date" (DD-MM-YYYY)
+                    release_year_raw = row.get("release_year", "").strip()
+                    released_date_raw = row.get("released_date", "").strip()
+                    try:
+                        if release_year_raw:
+                            release_year = int(release_year_raw)
+                        elif released_date_raw:
+                            # Parse year from "DD-MM-YYYY" or "YYYY-MM-DD" or bare "YYYY"
+                            parts = released_date_raw.replace("/", "-").split("-")
+                            candidate = next((p for p in parts if len(p) == 4), None)
+                            release_year = int(candidate) if candidate else None
+                        else:
+                            release_year = None
+                    except (ValueError, StopIteration):
+                        release_year = None
 
                     artist = Artist.objects.filter(name=artist_name).first()
                     if not artist:
@@ -104,11 +131,12 @@ class Command(BaseCommand):
                             valence=valence,
                             acousticness=acousticness,
                             loudness=loudness if loudness and -60 <= loudness <= 0 else None,
-                            primaryMood=infer_mood(energy, valence),
+                            primaryMood=infer_mood(energy, valence, language or ''),
                             isInstrumental=False,
                             isExplicit=False,
                             isActive=True,
                             language=language,
+                            releaseYear=release_year,
                         )
                         created += 1
 

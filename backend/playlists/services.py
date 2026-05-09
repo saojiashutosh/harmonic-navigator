@@ -477,20 +477,22 @@ def _era_score(*, track: Track, era_preference: str | None) -> float:
         return 0.0
     year = track.releaseYear
     if year is None:
-        # Unknown release year — always penalise so confirmed-era tracks rank higher
-        return -0.20
+        # Unknown year when era is explicitly requested — hard penalty so
+        # confirmed-era tracks always rank well above untagged ones.
+        return -0.40
     if era_preference == "latest" and year >= 2024:
-        return 0.45
+        return 0.55
     if era_preference == "recent" and 2020 <= year <= 2023:
-        return 0.42
+        return 0.52
     if era_preference == "era_2010s" and 2010 <= year <= 2019:
-        return 0.38
+        return 0.48
     if era_preference == "era_2000s" and 2000 <= year <= 2009:
-        return 0.38
+        return 0.48
     if era_preference == "nineties" and year < 2000:
-        return 0.40
-    # Wrong era — soft penalty so a great mood match can still appear
-    return -0.22
+        return 0.50
+    # Wrong era — penalty large enough to outweigh a plain mood match (+0.50),
+    # ensuring era-correct tracks always dominate when the user has a preference.
+    return -0.45
 
 
 def _era_query(era_preference: str | None) -> Q:
@@ -505,7 +507,7 @@ def _era_query(era_preference: str | None) -> Q:
     if era_preference == "era_2000s":
         return Q(releaseYear__gte=2000, releaseYear__lte=2009)
     if era_preference == "nineties":
-        return Q(releaseYear__lt=2000) | Q(releaseYear__isnull=True)
+        return Q(releaseYear__lt=2000)
     return Q()
 
 
