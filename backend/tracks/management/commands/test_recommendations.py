@@ -338,7 +338,7 @@ class Command(BaseCommand):
                 "recent":   (2020, 2023),
                 "era_2010s":(2010, 2019),
                 "era_2000s":(2000, 2009),
-                "nineties": (0,    1999),
+                "nineties": (1996, 1999),
             }
             lo, hi = era_ranges.get(era, (0, 9999))
             era_matches = sum(

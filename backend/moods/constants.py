@@ -171,7 +171,7 @@ QUESTION_DEFINITIONS = [
             {"rawValue": "recent", "label": "Recent — 2020 to 2023"},
             {"rawValue": "era_2010s", "label": "2010s decade"},
             {"rawValue": "era_2000s", "label": "2000s nostalgia"},
-            {"rawValue": "nineties", "label": "90s classics & before"},
+            {"rawValue": "nineties", "label": "90s — 1996 to 1999"},
             {"rawValue": "no_preference", "label": "Any era — surprise me"},
         ],
     },

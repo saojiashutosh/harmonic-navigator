@@ -175,7 +175,9 @@ def _build_candidate_pool(
     era_preference: str | None = None,
     limit: int,
 ) -> list[Track]:
-    base_qs = Track.objects.select_related("artistId").filter(isActive=True)
+    base_qs = Track.objects.select_related("artistId").filter(
+        isActive=True,
+    ).filter(Q(releaseYear__isnull=True) | Q(releaseYear__gte=1996))
     if social_setting in {"kids", "meeting"}:
         base_qs = base_qs.filter(isExplicit=False)
 
@@ -499,7 +501,7 @@ def _era_score(*, track: Track, era_preference: str | None) -> float:
         return 0.48
     if era_preference == "era_2000s" and 2000 <= year <= 2009:
         return 0.48
-    if era_preference == "nineties" and year < 2000:
+    if era_preference == "nineties" and 1996 <= year < 2000:
         return 0.50
     # Wrong era — penalty must exceed the max positive mood score (+0.50) so
     # correct-era tracks always dominate regardless of mood match strength.
@@ -518,7 +520,7 @@ def _era_query(era_preference: str | None) -> Q:
     if era_preference == "era_2000s":
         return Q(releaseYear__gte=2000, releaseYear__lte=2009)
     if era_preference == "nineties":
-        return Q(releaseYear__lt=2000)
+        return Q(releaseYear__gte=1996, releaseYear__lt=2000)
     return Q()
 
 
