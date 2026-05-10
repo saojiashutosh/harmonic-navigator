@@ -79,25 +79,49 @@ LANGUAGE_QUERIES: dict[str, list[str]] = {
 
 # Mood inference from title keywords (covers Hindi + English + regional)
 _SAD_WORDS = {
-    "sad", "dard", "dil", "tanha", "akela", "bichhad", "judai", "rona",
-    "ansoo", "pagal", "bewafa", "dhoka", "farewell", "goodbye", "miss",
-    "alone", "broken", "hurt", "pain", "cry", "tears", "sorry",
-    "kadhal", "kaadhal", "prema", "love hurts", "heartbreak",
+    # English
+    "sad", "farewell", "goodbye", "miss", "alone", "broken", "hurt",
+    "pain", "cry", "tears", "sorry", "heartbreak", "love hurts",
+    # Romanized Hindi / regional
+    "dard", "tanha", "akela", "bichhad", "bichad", "judai", "rona",
+    "ansoo", "aansoo", "pagal", "bewafa", "dhoka", "alvida", "intezaar",
+    "tadap", "yaad", "rootha", "teri kami", "dil tuta", "rota", "toota",
+    "bikhre", "gham", "judaai", "dil diya", "woh lamhe", "teri kasam",
+    "kabhi alvida", "tujhse naraaz", "ek pyar ka nagma",
+    # South Indian romanized
+    "kadhal", "kaadhal", "prema", "pirivu", "virah",
 }
 _CALM_WORDS = {
-    "sufi", "ghazal", "acoustic", "peace", "shanti", "sukoon", "aaina",
-    "rain", "slow", "gentle", "lullaby", "meditation", "devotional",
-    "prayer", "bhajan", "kirtan", "aarti", "amma", "maa",
+    # English
+    "acoustic", "peace", "rain", "slow", "gentle", "lullaby",
+    "meditation", "prayer", "aarti",
+    # Romanized Hindi
+    "sufi", "ghazal", "sukoon", "shanti", "chaand", "chand", "raat",
+    "subah", "neend", "nind", "aasmaan", "mehfil", "noor", "roshni",
+    "sitaron", "chanda", "sohna", "pal", "aaina", "aa chal",
+    "devotional", "bhajan", "kirtan", "amma", "maa", "qawwali",
+    "raag", "raaga", "thumri", "dastan", "kahani", "khamoshi",
 }
 _ENERGY_WORDS = {
-    "dance", "bhangra", "dhol", "party", "remix", "dj", "beat",
-    "pump", "fire", "rap", "hip hop", "rock", "metal", "bang",
-    "hungama", "josh", "scene", "swag",
+    # English
+    "dance", "party", "remix", "dj", "beat", "pump", "fire", "rap",
+    "hip hop", "rock", "metal", "bang", "swag", "scene",
+    "bhangra", "dhol",
+    # Romanized Hindi
+    "naach", "nachle", "thumka", "dholki", "aaja", "balle", "hungama",
+    "josh", "joshilay", "goli", "bullet", "power", "boom", "sher",
+    "dabangg", "rowdy", "tezz", "bhaag", "nachna", "hulchul",
+    "dhamaal", "dhamaka", "zor", "toofan", "aandhi",
 }
 _CELEBRATORY_WORDS = {
-    "wedding", "shaadi", "happy", "celebration", "jashn", "khushi",
-    "congratulations", "holi", "diwali", "eid", "festival", "zindagi",
-    "jeet", "victory", "win", "baraat",
+    # English
+    "wedding", "happy", "celebration", "congratulations", "festival",
+    "victory", "win", "holi", "diwali", "eid",
+    # Romanized Hindi
+    "shaadi", "baraat", "mehndi", "jashn", "khushi", "khushiyan",
+    "yaar", "dost", "milke", "mubarak", "naya saal", "rang",
+    "jeet", "fateh", "zindagi", "zindagi jee le", "jiyo",
+    "masti", "mazaa", "toli", "sangat", "aayi hai bahaaren",
 }
 
 _MOOD_BASE = {
