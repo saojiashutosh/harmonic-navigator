@@ -64,12 +64,13 @@ _CELEBRATORY_WORDS = {
 
 # Redistribution buckets for tracks that still default to "focused"
 # Cumulative thresholds (hash % 100 < threshold → mood)
+# focused raised to 15% so focused playlists have enough matching tracks.
 _REDISTRIB_THRESHOLDS = [
-    (33,  "calm"),
-    (61,  "melancholic"),   # 33+28
-    (79,  "energized"),     # 61+18
-    (93,  "celebratory"),   # 79+14
-    (100, "focused"),       # 93+7
+    (30,  "calm"),
+    (55,  "melancholic"),   # 30+25
+    (70,  "energized"),     # 55+15
+    (85,  "celebratory"),   # 70+15
+    (100, "focused"),       # 85+15
 ]
 
 # Energy / valence baselines per mood (same as import_saavn_songs._MOOD_BASE)

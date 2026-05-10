@@ -41,12 +41,16 @@ def build_playlist_for_session(
         music_preference=music_preference,
     )
 
+    # Anxious users benefit from calm/grounding music — remap for playlist purposes.
+    # The mood label shown in the UI stays "anxious"; only the track selection uses "calm".
+    playlist_mood = "calm" if inference.moodLabel == "anxious" else inference.moodLabel
+
     # Use secondary mood for diversity mixing
     secondary_mood = getattr(inference, "secondaryMoodLabel", None)
     mood_blend_ratio = getattr(inference, "moodBlendRatio", 1.0) or 1.0
 
     candidate_tracks = _build_candidate_pool(
-        mood_label=inference.moodLabel,
+        mood_label=playlist_mood,
         secondary_mood=secondary_mood,
         social_setting=social_setting,
         music_preference=music_preference,
@@ -65,14 +69,14 @@ def build_playlist_for_session(
     # avoids N+1 queries inside the scoring loop.
     mood_tag_ids = _mood_tag_track_ids(
         tracks=candidate_tracks,
-        moods={inference.moodLabel, secondary_mood} - {None},
+        moods={playlist_mood, secondary_mood} - {None},
     )
 
     scored_tracks = []
     for track in candidate_tracks:
         relevance_score = _score_track(
             track=track,
-            mood_label=inference.moodLabel,
+            mood_label=playlist_mood,
             secondary_mood=secondary_mood,
             mood_blend_ratio=mood_blend_ratio,
             type_weights=type_weights,
