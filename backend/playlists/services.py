@@ -548,7 +548,12 @@ def _language_query(music_language: str | None) -> Q:
         if lang == "instrumental":
             combined |= Q(isInstrumental=True) | ~Q(type=Track.TypeChoices.SONG)
         elif lang == "hindi":
-            combined |= Q(language__iexact="hindi") | Q(genre__icontains="bollywood") | Q(region__iexact="india")
+            # Punjabi tracks are part of the Hindi music pool
+            combined |= (
+                Q(language__iexact="hindi") | Q(language__iexact="punjabi")
+                | Q(genre__icontains="bollywood") | Q(genre__icontains="punjabi")
+                | Q(region__iexact="india")
+            )
         else:
             combined |= Q(language__iexact=lang)
     return combined

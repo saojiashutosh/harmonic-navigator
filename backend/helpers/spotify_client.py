@@ -82,7 +82,8 @@ def get_track(track_url_or_id: str, market: str | None = None) -> dict:
 
 def get_playlist_tracks(playlist_url_or_id: str, market: str | None = None) -> list[dict]:
     client = _build_client()
-    market_code = market or os.getenv("SPOTIFY_MARKET", "IN")
+    # Don't force a market code for playlist fetches — some playlists 403 with market params.
+    market_code = market or None
     playlist_id = extract_spotify_playlist_id(playlist_url_or_id)
 
     try:
