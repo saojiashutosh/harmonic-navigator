@@ -350,10 +350,13 @@ class Command(BaseCommand):
                         ).exists():
                             continue
 
-                        # Artist
+                        # Artist — use filter().first() to avoid MultipleObjectsReturned
+                        # when duplicate artist names exist (no unique constraint on Artist.name)
                         ak = artist_name.lower()
                         if ak not in artist_cache:
-                            artist, _ = Artist.objects.get_or_create(name=artist_name)
+                            artist = Artist.objects.filter(name=artist_name).first()
+                            if artist is None:
+                                artist = Artist.objects.create(name=artist_name)
                             artist_cache[ak] = artist
                         artist_obj = artist_cache[ak]
 
