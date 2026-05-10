@@ -62,6 +62,7 @@ class Question(HarmonicBaseModel):
 
     class InputTypeChoices(models.TextChoices):
         SELECT = "select", "Select"
+        MULTI_SELECT = "multi_select", "Multi Select"
         TEXT = "text", "Text"
 
     key = models.CharField(
@@ -138,8 +139,7 @@ class Answer(HarmonicBaseModel):
         verbose_name=_("Question Id"),
     )
 
-    rawValue = models.CharField(
-        max_length=64,
+    rawValue = models.TextField(
         null=True,
         verbose_name=_("Raw Value"),
         db_column="raw_value",

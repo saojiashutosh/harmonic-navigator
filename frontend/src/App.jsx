@@ -352,7 +352,7 @@ function Landing({ onStart }) {
 
       <div className="og-three">
         {[
-          { n: 'one', t: 'A small conversation', d: 'Seven gentle questions, on a single page. Your words, your weather.', e: 0.3, m: 'calm' },
+          { n: 'one', t: 'A small conversation', d: 'A few gentle questions, on a single page. Your words, your weather.', e: 0.3, m: 'calm' },
           { n: 'two', t: 'A reading of the room', d: 'We listen for the shape — energy, intent, the colour of the hour.', e: 0.55, m: 'focused' },
           { n: 'three', t: 'A hand-tied bouquet', d: 'Ten to fifteen tracks. Picked, not generated. Press play, or browse.', e: 0.85, m: 'celebratory' },
         ].map((s, i) => (
@@ -424,13 +424,11 @@ function MoodCard({ onComplete }) {
     }
     setBleedKey(`${q.key}-${v}-${Date.now()}`);
   };
-  const total = questions.length || 1;
-  const answered = Object.entries(answers).filter(([, v]) =>
-    Array.isArray(v) ? v.length > 0 : v !== undefined
-  ).length;
   // Only single-select questions are mandatory; text and multi_select are optional
   const selectRequired = questions.filter(q => q.inputType === 'select');
   const selectAnswered = selectRequired.filter(q => answers[q.key] !== undefined).length;
+  const total = selectRequired.length || 1;
+  const answered = selectAnswered;
   const ready = selectRequired.length > 0 && selectAnswered >= selectRequired.length;
   const remaining = selectRequired.length - selectAnswered;
 
@@ -457,7 +455,7 @@ function MoodCard({ onComplete }) {
         <div className="og-rail-sticky">
           <span className="og-eyebrow">a session · {new Date().toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()}</span>
           <h1>tell me how the<br /><em>day feels</em>.</h1>
-          <p>seven small questions, on one quiet page. nothing is fixed; you can change your mind as you go.</p>
+          <p>a few quiet questions, on one page. nothing is fixed; you can change your mind as you go.</p>
           <div className="og-rail-progress">
             <div className="og-rail-track">
               {Array.from({ length: total }).map((_, i) => (
@@ -633,11 +631,9 @@ function Results({ results, onRestart }) {
   const conf = Math.round((results?.confidence || 0) * 100);
 
   const handlePlay = (i) => {
-    // If the active queue is already this set, just jump to the track
-    if (queue.length > 0 && queue[0].id === tracks[0].id) {
+    if (queue.length > 0 && tracks.length > 0 && queue[0].id === tracks[0].id) {
       jumpTo(i);
     } else {
-      // Otherwise, load this new bouquet into the player context
       loadPlaylist(tracks, i, results?.moodLabel, '#C26F3C');
     }
   };
@@ -679,7 +675,7 @@ function Results({ results, onRestart }) {
 
 /* ── Player strip ──────────────────────────────────────── */
 function PlayerStrip() {
-  const { currentTrack: track, queue, currentIndex, isPlaying, togglePlay, playNext, playPrevious, closePlayer, moodLabel, progress, seekTo } = usePlayer();
+  const { currentTrack: track, queue, currentIndex, isPlaying, isLoadingAudio, togglePlay, playNext, playPrevious, closePlayer, moodLabel, progress, seekTo } = usePlayer();
 
   const [tick, setTick] = useState(0);
 
@@ -689,12 +685,8 @@ function PlayerStrip() {
     return () => clearInterval(id);
   }, [isPlaying]);
 
-  if (!track || !queue.length) return null;
-
-  const meta = HS.moodMeta(moodLabel);
-
+  // All hooks must be called before any early return (Rules of Hooks)
   const waveW = 220, waveH = 26, waveMid = waveH / 2, n = 44;
-
   const path = useMemo(() => {
     let d = '';
     for (let i = 0; i <= n; i++) {
@@ -705,6 +697,10 @@ function PlayerStrip() {
     }
     return d;
   }, [tick]);
+
+  if (!track || !queue.length) return null;
+
+  const meta = HS.moodMeta(moodLabel);
 
   const handleSeek = (e) => {
     if (!seekTo) return;
@@ -717,6 +713,8 @@ function PlayerStrip() {
   const boatPhase = tick / 8;
   const boatY = waveMid + Math.sin(((boatX / waveW) * n) * 0.45 + boatPhase) * 5 + Math.sin(((boatX / waveW) * n) * 0.2 + boatPhase * 0.7) * 3.5;
 
+  const playIcon = isLoadingAudio ? '···' : isPlaying ? '❚❚' : '▶';
+
   return (
     <div className="og-player">
       <div className="og-player-glow" />
@@ -724,14 +722,14 @@ function PlayerStrip() {
         <div className="og-player-mood"><span className="og-pdot" />{(meta?.label || moodLabel || 'playing').toLowerCase()}</div>
         <div className="og-player-track">
           <span className="og-pt">{track.title}</span>
-          <span className="og-pa">{track.artistId?.name || track.artistName}</span>
+          <span className="og-pa">{isLoadingAudio ? 'finding on JioSaavn…' : (track.artistId?.name || track.artistName)}</span>
         </div>
-        
+
         <svg width={waveW} height={waveH} className="og-player-wave" onClick={handleSeek} style={{ cursor: 'pointer', overflow: 'visible' }}>
           <rect width={waveW} height={waveH} fill="transparent" />
           <path d={path} stroke="var(--sage)" strokeWidth="1.2" fill="none" strokeLinecap="round" opacity="0.6" />
           <path d={path} stroke="var(--accent)" strokeWidth="1.6" fill="none" strokeLinecap="round" clipPath="url(#progress-clip)" />
-          
+
           <clipPath id="progress-clip">
             <rect x="0" y="-10" width={boatX} height="50" />
           </clipPath>
@@ -743,9 +741,9 @@ function PlayerStrip() {
         </svg>
 
         <div className="og-player-controls">
-          <button onClick={playPrevious} disabled={currentIndex === 0}>‹‹</button>
-          <button onClick={togglePlay} className="og-pp">{isPlaying ? '❚❚' : '▶'}</button>
-          <button onClick={playNext} disabled={currentIndex >= queue.length - 1}>››</button>
+          <button onClick={playPrevious} disabled={currentIndex === 0 || isLoadingAudio}>‹‹</button>
+          <button onClick={togglePlay} className="og-pp" disabled={isLoadingAudio}>{playIcon}</button>
+          <button onClick={playNext} disabled={currentIndex >= queue.length - 1 || isLoadingAudio}>››</button>
         </div>
         <div className="og-player-meta"><span>{currentIndex + 1}/{queue.length}</span><button className="og-pclose" onClick={closePlayer}>×</button></div>
       </div>

@@ -9,10 +9,9 @@ const headers = {
  * GET /moods/questions/
  */
 export const fetchQuestions = async () => {
-  const res = await fetch(`${BASE_URL}/moods/questions/`);
+  const res = await fetch(`${BASE_URL}/moods/questions/?limit=100`);
   if (!res.ok) throw new Error(`Failed to fetch questions: ${res.status}`);
   const data = await res.json();
-  // Handle both array and paginated { results: [...] } responses
   return Array.isArray(data) ? data : data.results ?? [];
 };
 
@@ -39,10 +38,12 @@ export const createMoodSession = async () => {
  * Returns: { id, moodLabel, confidence, rawScores, moodSessionId }
  */
 export const submitAnswers = async (sessionId, answersMap) => {
-  const answers = Object.entries(answersMap).map(([question_key, raw_value]) => ({
-    question_key,
-    raw_value: raw_value ?? '',
-  }));
+  const answers = Object.entries(answersMap)
+    .filter(([, raw_value]) => Array.isArray(raw_value) ? raw_value.length > 0 : true)
+    .map(([question_key, raw_value]) => ({
+      question_key,
+      raw_value: raw_value ?? '',
+    }));
 
   const res = await fetch(`${BASE_URL}/moods/mood-sessions/${sessionId}/submit/`, {
     method: 'POST',
@@ -83,11 +84,15 @@ export const fetchPlaylistTracks = async (playlistId) => {
 };
 
 /**
- * Fetch a YouTube Video ID for a given search query
+ * Fetch a full-quality audio stream URL from JioSaavn.
+ * Pass trackId to enable DB caching — subsequent calls for the same track
+ * are served from the DB instantly without hitting JioSaavn.
  */
-export const fetchYoutubeSearch = async (query) => {
-  const res = await fetch(`${BASE_URL}/playlists/youtube-search/?q=${encodeURIComponent(query)}`);
+export const fetchSaavnSearch = async (query, trackId) => {
+  let url = `${BASE_URL}/playlists/saavn-search/?q=${encodeURIComponent(query)}`;
+  if (trackId) url += `&track_id=${encodeURIComponent(trackId)}`;
+  const res = await fetch(url);
   if (!res.ok) return null;
   const data = await res.json();
-  return data.videoId || null;
+  return data.audioUrl || null;
 };

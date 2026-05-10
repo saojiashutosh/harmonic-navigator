@@ -125,30 +125,11 @@ QUESTION_DEFINITIONS = [
         ],
     },
     {
-        "key": "music_style",
-        "text": "What type of music are you in the mood for?",
-        "category": "preference",
-        "inputType": "select",
-        "order": 7,
-        "options": [
-            {"rawValue": "no_preference", "label": "No preference / Any"},
-            {"rawValue": "bollywood", "label": "Bollywood / Hindi Film"},
-            {"rawValue": "hollywood", "label": "Hollywood / Western"},
-            {"rawValue": "marathi", "label": "Marathi"},
-            {"rawValue": "devotional", "label": "Devotional / Spiritual"},
-            {"rawValue": "instrumental", "label": "Instrumental"},
-            {"rawValue": "classical", "label": "Indian Classical"},
-            {"rawValue": "pop", "label": "Pop / Contemporary"},
-            {"rawValue": "indie", "label": "Indie / Alternative"},
-            {"rawValue": "lofi", "label": "Lo-Fi / Chill"},
-        ],
-    },
-    {
         "key": "playlist_goal",
         "text": "What should this playlist do for you?",
         "category": "preference",
         "inputType": "select",
-        "order": 8,
+        "order": 7,
         "options": [
             {"rawValue": "focus", "label": "Help me focus and concentrate"},
             {"rawValue": "relax", "label": "Help me relax and slow down"},
@@ -163,7 +144,7 @@ QUESTION_DEFINITIONS = [
         "text": "Any artist you want to hear? Leave blank if not.",
         "category": "preference",
         "inputType": "text",
-        "order": 9,
+        "order": 8,
         "options": [],
     },
     {
@@ -171,7 +152,7 @@ QUESTION_DEFINITIONS = [
         "text": "What time of day is it for you?",
         "category": "context",
         "inputType": "select",
-        "order": 10,
+        "order": 9,
         "options": [
             {"rawValue": "morning", "label": "Morning — fresh start"},
             {"rawValue": "afternoon", "label": "Afternoon — mid-day groove"},
@@ -184,7 +165,7 @@ QUESTION_DEFINITIONS = [
         "text": "From which era do you want your songs?",
         "category": "preference",
         "inputType": "select",
-        "order": 11,
+        "order": 10,
         "options": [
             {"rawValue": "latest", "label": "Latest — 2024 & newer"},
             {"rawValue": "recent", "label": "Recent — 2020 to 2023"},

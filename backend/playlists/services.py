@@ -195,28 +195,35 @@ def _build_candidate_pool(
     pool_size = max(limit * 25, 250)
     slice_size = max(limit * 8, 50)
     queries = [
-        # 1. Best match: all filters including era
+        # 1. Perfect match: all filters + era
         artist_q & language_q & style_q & type_q & mood_q & era_q,
         # 2. Era + language + mood (no style)
         era_q & language_q & mood_q & type_q,
-        # 3-4. Artist combos
+        # 3. Era + language (any mood) — pulls ALL era-correct language tracks
+        #    into the pool before non-era tracks so scoring can rank them first
+        era_q & language_q,
+        # 4. Era + mood (any language)
+        era_q & mood_q,
+        # 5. Era only — maximise era-correct pool when era is requested
+        era_q,
+        # 6-7. Artist combos (artist preference overrides era)
         artist_q & language_q & type_q,
         artist_q & style_q & type_q,
-        # 5-6. Language + style/mood combos
+        # 8-9. Language + style/mood combos (no era)
         language_q & style_q & type_q & mood_q,
         language_q & style_q & type_q,
-        # 7-9. Partial combos prioritising language
+        # 10-13. Partial combos prioritising language
         artist_q & any_mood_q,
         language_q & mood_q & type_q,
         language_q & any_mood_q,
         language_q & type_q,
-        # 10. Language only
+        # 14. Language only
         language_q,
-        # 11-13. Style / mood fallbacks
+        # 15-17. Style / mood fallbacks
         style_q & mood_q & type_q,
         style_q & type_q,
         any_mood_q & type_q,
-        # 14-17. Bare fallbacks
+        # 18-21. Bare fallbacks
         artist_q,
         type_q,
         any_mood_q,
@@ -477,9 +484,9 @@ def _era_score(*, track: Track, era_preference: str | None) -> float:
         return 0.0
     year = track.releaseYear
     if year is None:
-        # Unknown year when era is explicitly requested — hard penalty so
-        # confirmed-era tracks always rank well above untagged ones.
-        return -0.40
+        # Unknown release year — penalise heavily so confirmed-era tracks always
+        # rank well above untagged ones even when the pool has few era matches.
+        return -0.70
     if era_preference == "latest" and year >= 2024:
         return 0.55
     if era_preference == "recent" and 2020 <= year <= 2023:
@@ -490,9 +497,9 @@ def _era_score(*, track: Track, era_preference: str | None) -> float:
         return 0.48
     if era_preference == "nineties" and year < 2000:
         return 0.50
-    # Wrong era — penalty large enough to outweigh a plain mood match (+0.50),
-    # ensuring era-correct tracks always dominate when the user has a preference.
-    return -0.45
+    # Wrong era — penalty must exceed the max positive mood score (+0.50) so
+    # correct-era tracks always dominate regardless of mood match strength.
+    return -0.70
 
 
 def _era_query(era_preference: str | None) -> Q:

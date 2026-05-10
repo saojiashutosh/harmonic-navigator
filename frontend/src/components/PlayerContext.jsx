@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 
 const PlayerContext = createContext(null);
 
@@ -8,6 +8,14 @@ export const usePlayer = () => {
   return ctx;
 };
 
+function safePlay(audio) {
+  if (!audio) return;
+  try {
+    const p = audio.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (_) {}
+}
+
 export const PlayerProvider = ({ children }) => {
   const [queue, setQueue] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
@@ -15,19 +23,26 @@ export const PlayerProvider = ({ children }) => {
   const [isMinimized, setIsMinimized] = useState(false);
   const [moodColor, setMoodColor] = useState('#5B8A8A');
   const [moodLabel, setMoodLabel] = useState('');
-  // Incremented on every track change to force iframe reload
   const [embedKey, setEmbedKey] = useState(0);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [seekTo, setSeekTo] = useState(null);
 
-  // Playback tracking
-  const [progress, setProgress] = useState(0); // 0 to 1
-  const [duration, setDuration] = useState(0); // seconds
-  const [seekTo, setSeekTo] = useState(null); // Function to seek
+  // Refs so callbacks are stable (no deps) and always read current values
+  const audioRef = useRef(null);        // assigned by MusicPlayer on mount
+  const currentIndexRef = useRef(-1);
+  const queueLengthRef = useRef(0);
+  const isPlayingRef = useRef(false);
+
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+  useEffect(() => { queueLengthRef.current = queue.length; }, [queue.length]);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
   const currentTrack = currentIndex >= 0 && currentIndex < queue.length
     ? queue[currentIndex]
     : null;
 
-  // Load and play a playlist
   const loadPlaylist = useCallback((tracks, startIdx = 0, mood = '', color = '#5B8A8A') => {
     setQueue(tracks);
     setCurrentIndex(startIdx);
@@ -36,50 +51,64 @@ export const PlayerProvider = ({ children }) => {
     setMoodColor(color);
     setMoodLabel(mood);
     setEmbedKey(k => k + 1);
+    setProgress(0);
+    safePlay(audioRef.current); // unlock autoplay within the user gesture
   }, []);
 
-  // Play / Pause (No-op mostly used for UI state now since YouTube iframe manages itself)
   const togglePlay = useCallback(() => {
-    setIsPlaying(!isPlaying);
-  }, [isPlaying]);
+    const next = !isPlayingRef.current;
+    if (next) safePlay(audioRef.current); // unlock before state update
+    setIsPlaying(next);
+  }, []);
 
-  // Next track
   const playNext = useCallback(() => {
-    if (currentIndex < queue.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+    const ci = currentIndexRef.current;
+    const ql = queueLengthRef.current;
+    if (ci < ql - 1) {
+      setCurrentIndex(ci + 1);
       setIsPlaying(true);
       setEmbedKey(k => k + 1);
+      setProgress(0);
+      safePlay(audioRef.current);
     } else {
       setIsPlaying(false);
     }
-  }, [currentIndex, queue.length]);
+  }, []);
 
-  // Previous track
   const playPrevious = useCallback(() => {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
+    const ci = currentIndexRef.current;
+    if (ci > 0) {
+      setCurrentIndex(ci - 1);
       setIsPlaying(true);
       setEmbedKey(k => k + 1);
+      setProgress(0);
+      safePlay(audioRef.current);
     }
-  }, [currentIndex]);
+  }, []);
 
-  // Jump to specific track
   const jumpTo = useCallback((index) => {
-    if (index >= 0 && index < queue.length) {
+    const ql = queueLengthRef.current;
+    if (index >= 0 && index < ql) {
       setCurrentIndex(index);
       setIsPlaying(true);
       setEmbedKey(k => k + 1);
+      setProgress(0);
+      safePlay(audioRef.current);
     }
-  }, [queue.length]);
+  }, []);
 
-  // Close player
   const closePlayer = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+    }
     setQueue([]);
     setCurrentIndex(-1);
     setIsPlaying(false);
+    setProgress(0);
+    setDuration(0);
+    setIsLoadingAudio(false);
   }, []);
-
-  const hasQueue = queue.length > 0;
 
   return (
     <PlayerContext.Provider
@@ -92,7 +121,10 @@ export const PlayerProvider = ({ children }) => {
         moodColor,
         moodLabel,
         embedKey,
-        hasQueue,
+        hasQueue: queue.length > 0,
+        isLoadingAudio,
+        setIsLoadingAudio,
+        audioRef,
         togglePlay,
         playNext,
         playPrevious,

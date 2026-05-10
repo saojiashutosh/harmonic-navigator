@@ -47,23 +47,26 @@ const OPTION_DATA = {
     surprise: { emoji: "🎲", title: "Surprise Me", desc: "Surprise me. I trust the algorithm." },
   },
   music_language: {
-    no_preference: { emoji: "🌍", title: "No Preference", desc: "No boundaries. Music is universal." },
     hindi: { emoji: "🇮🇳", title: "Hindi", desc: "Hindi melodies and Bollywood magic." },
     english: { emoji: "🎤", title: "English", desc: "English pop, rock, and everything in between." },
     marathi: { emoji: "🪘", title: "Marathi", desc: "Regional roots. Marathi soul and rhythm." },
     punjabi: { emoji: "💃", title: "Punjabi", desc: "High energy bhangra and Punjabi pop." },
-    instrumental: { emoji: "🎻", title: "Instrumental", desc: "Pure instrumental. Let the instruments talk." },
+    gujarati: { emoji: "🎊", title: "Gujarati", desc: "Gujarati folk and film music." },
+    tamil: { emoji: "🥁", title: "Tamil", desc: "Tamil beats and Kollywood hits." },
+    telugu: { emoji: "🎷", title: "Telugu", desc: "Telugu tunes and Tollywood energy." },
+    no_preference: { emoji: "🌍", title: "No Preference", desc: "No boundaries. Music is universal." },
   },
   music_style: {
     no_preference: { emoji: "🎶", title: "No Preference", desc: "Open to anything. Mix it up." },
-    bollywood: { emoji: "🎬", title: "Bollywood", desc: "Bollywood soundtracks and film music." },
+    bollywood: { emoji: "🎬", title: "Bollywood", desc: "Bollywood soundtracks and Hindi film music." },
     hollywood: { emoji: "🌟", title: "Hollywood", desc: "Hollywood scores and English pop hits." },
+    marathi: { emoji: "🪘", title: "Marathi", desc: "Marathi regional music and natya sangeet." },
+    devotional: { emoji: "🙏", title: "Devotional", desc: "Spiritual, bhajans and devotional music." },
+    instrumental: { emoji: "🎻", title: "Instrumental", desc: "Pure instrumental. Let the music speak." },
+    classical: { emoji: "🪷", title: "Classical", desc: "Indian classical ragas and timeless beauty." },
     pop: { emoji: "🎤", title: "Pop", desc: "Catchy hooks and sing-along vibes." },
     indie: { emoji: "🎸", title: "Indie", desc: "Underground, authentic, unpolished gems." },
-    classical: { emoji: "🪷", title: "Classical", desc: "Indian classical ragas and timeless beauty." },
-    raga: { emoji: "🎵", title: "Raga", desc: "Deep classical raga explorations." },
     lofi: { emoji: "🌊", title: "Lo-Fi", desc: "Beats to relax, study, or zone out." },
-    devotional: { emoji: "🙏", title: "Devotional", desc: "Spiritual and devotional music." },
   },
   playlist_goal: {
     focus: { emoji: "🎯", title: "Focus", desc: "Keep me locked in and productive." },
@@ -168,10 +171,19 @@ const QuestionPage = ({ onRestart, onComplete, onInteraction, onGenerating }) =>
 
   const handleOptionSelect = (value) => {
     const currentQ = questions[currentQuestionIndex];
-    setAnswers(prev => ({ ...prev, [currentQ.key]: value }));
-    setPulsingCard(value);
-    setTimeout(() => setPulsingCard(null), 350);
-    // Trigger wave ripple
+    if (currentQ.inputType === 'multi_select') {
+      setAnswers(prev => {
+        const current = Array.isArray(prev[currentQ.key]) ? prev[currentQ.key] : [];
+        const next = current.includes(value)
+          ? current.filter(v => v !== value)
+          : [...current, value];
+        return { ...prev, [currentQ.key]: next };
+      });
+    } else {
+      setAnswers(prev => ({ ...prev, [currentQ.key]: value }));
+      setPulsingCard(value);
+      setTimeout(() => setPulsingCard(null), 350);
+    }
     onInteraction?.();
   };
 
@@ -312,28 +324,39 @@ const QuestionPage = ({ onRestart, onComplete, onInteraction, onGenerating }) =>
           <h1 className="question-title">
             {renderQuestionText(currentQ.text)}
           </h1>
+          {currentQ.inputType === 'multi_select' && (
+            <p className="multi-select-hint">Select all that apply</p>
+          )}
 
           <div
             className={`energy-cards cols-${colCount}`}
             style={{ gridTemplateColumns: `repeat(${colCount}, 1fr)` }}
-            role="radiogroup"
+            role={currentQ.inputType === 'multi_select' ? 'group' : 'radiogroup'}
             aria-label={currentQ.text}
           >
-            {currentQ.inputType === 'select' && currentQ.options.map((opt, idx) => {
-              const isSelected = answers[currentQ.key] === opt.rawValue;
-              const isPulsing = pulsingCard === opt.rawValue;
+            {(currentQ.inputType === 'select' || currentQ.inputType === 'multi_select') && currentQ.options.map((opt, idx) => {
+              const isMulti = currentQ.inputType === 'multi_select';
+              const isSelected = isMulti
+                ? (Array.isArray(answers[currentQ.key]) && answers[currentQ.key].includes(opt.rawValue))
+                : answers[currentQ.key] === opt.rawValue;
+              const isPulsing = !isMulti && pulsingCard === opt.rawValue;
               const optData = getOptionData(currentQ.key, opt.rawValue, opt.label);
               return (
                 <div
                   key={idx}
-                  className={`energy-card ${isSelected ? 'active' : ''} ${isPulsing ? 'pulse' : ''}`}
+                  className={`energy-card ${isSelected ? 'active' : ''} ${isPulsing ? 'pulse' : ''} ${isMulti ? 'multi-select-card' : ''}`}
                   onClick={() => handleOptionSelect(opt.rawValue)}
                   onMouseEnter={() => onInteraction?.()}
-                  role="radio"
+                  role={isMulti ? 'checkbox' : 'radio'}
                   aria-checked={isSelected}
                   tabIndex={0}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOptionSelect(opt.rawValue); } }}
                 >
+                  {isMulti && (
+                    <span className={`multi-check ${isSelected ? 'checked' : ''}`} aria-hidden="true">
+                      {isSelected ? '✓' : ''}
+                    </span>
+                  )}
                   <span className="card-emoji" aria-hidden="true">{optData.emoji}</span>
                   <h3 className="card-title-text">{optData.title}</h3>
                   {optData.desc && <p className="card-desc-text">{optData.desc}</p>}

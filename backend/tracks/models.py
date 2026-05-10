@@ -121,6 +121,19 @@ class Track(HarmonicBaseModel):
         db_column="external_url",
         null=True,
     )
+    streamUrl = models.CharField(
+        max_length=500,
+        verbose_name=_("streamUrl"),
+        db_column="stream_url",
+        null=True,
+        blank=True,
+    )
+    releaseYear = models.PositiveSmallIntegerField(
+        verbose_name=_("releaseYear"),
+        db_column="release_year",
+        null=True,
+        blank=True,
+    )
     tempoBpm = models.PositiveSmallIntegerField(
         verbose_name=_("tempoBpm"),
         db_column="tempo_bpm",

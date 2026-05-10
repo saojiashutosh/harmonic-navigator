@@ -19,16 +19,22 @@ LOGIT_SCALE = 2.4
 LOW_CONFIDENCE_THRESHOLD = 0.40
 
 
-def normalise_answer_value(raw_value: str, question: Question) -> float:
+def normalise_answer_value(raw_value, question: Question) -> float:
     if question.inputType == Question.InputTypeChoices.SELECT:
+        raw_value = str(raw_value) if raw_value is not None else ""
         if raw_value not in OPTION_WEIGHTS:
             valid = sorted(OPTION_WEIGHTS.keys())
             raise ValueError(
                 f"Unknown option '{raw_value}' for question '{question.key}'. Valid options: {valid}"
             )
         return OPTION_WEIGHTS[raw_value]
+    if question.inputType == Question.InputTypeChoices.MULTI_SELECT:
+        # A non-empty selection counts as 1.0; responses are expanded per-value in services.py
+        if isinstance(raw_value, list):
+            return 1.0 if raw_value else 0.0
+        return 1.0 if raw_value else 0.0
     if question.inputType == Question.InputTypeChoices.TEXT:
-        return 1.0 if raw_value.strip() else 0.0
+        return 1.0 if str(raw_value or "").strip() else 0.0
 
     raise ValueError(f"Unsupported input type '{question.inputType}'.")
 

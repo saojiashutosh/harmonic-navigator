@@ -1,134 +1,137 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { usePlayer } from './PlayerContext';
-import { fetchYoutubeSearch } from '../api';
+import { fetchSaavnSearch } from '../api';
+
+const SKIP_DELAY_MS = 3000;
 
 const MusicPlayer = () => {
   const {
     currentTrack,
     embedKey,
-    hasQueue,
     isPlaying,
     playNext,
     setProgress,
     setDuration,
-    setSeekTo
+    setSeekTo,
+    setIsLoadingAudio,
+    audioRef,
   } = usePlayer();
 
-  const [youtubeVideoId, setYoutubeVideoId] = useState(null);
-  const playerRef = useRef(null);
-  const iframeRef = useRef(null);
+  const [audioUrl, setAudioUrl] = useState(null);
+  const audioEl = useRef(null);
+  const skipTimerRef = useRef(null);
+  const isPlayingRef = useRef(isPlaying);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
-  // Load Youtube Iframe API
+  // Register this component's <audio> element with the shared context ref
   useEffect(() => {
-    if (!window.YT) {
-      const tag = document.createElement('script');
-      tag.src = "https://www.youtube.com/iframe_api";
-      const firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+    audioRef.current = audioEl.current;
+    return () => { audioRef.current = null; };
+  }, []); // runs once on mount / cleanup on unmount
+
+  const clearSkipTimer = () => {
+    if (skipTimerRef.current) { clearTimeout(skipTimerRef.current); skipTimerRef.current = null; }
+  };
+
+  // Resolve audio URL whenever the track changes
+  useEffect(() => {
+    setAudioUrl(null);
+    clearSkipTimer();
+
+    if (!currentTrack) {
+      setIsLoadingAudio(false);
+      return;
     }
-  }, []);
 
+    // Use cached URL from DB if available
+    if (currentTrack.streamUrl) {
+      setAudioUrl(currentTrack.streamUrl);
+      return;
+    }
+
+    const title = (currentTrack.title || '').trim();
+    const artist = (currentTrack.artistId?.name || currentTrack.artistName || '').trim();
+    const query = title && artist ? `${title} ${artist}` : title || artist;
+    if (!query) { setIsLoadingAudio(false); return; }
+
+    let cancelled = false;
+    setIsLoadingAudio(true);
+
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const dbId = UUID_RE.test(currentTrack.id) ? currentTrack.id : null;
+
+    (async () => {
+      let url = await fetchSaavnSearch(query, dbId).catch(() => null);
+      if (!url && artist) url = await fetchSaavnSearch(title, dbId).catch(() => null);
+      if (cancelled) return;
+      setIsLoadingAudio(false);
+      if (url) {
+        setAudioUrl(url);
+      } else {
+        skipTimerRef.current = setTimeout(() => { if (!cancelled) playNext(); }, SKIP_DELAY_MS);
+      }
+    })();
+
+    return () => { cancelled = true; clearSkipTimer(); };
+  }, [currentTrack?.id, embedKey]);
+
+  // Wire the audio element to the URL
   useEffect(() => {
-    setYoutubeVideoId(null);
-    if (!currentTrack) return;
+    const audio = audioEl.current;
+    if (!audio) return;
 
-    const artistName = currentTrack.artistId?.name || currentTrack.artistName || '';
-    const title = currentTrack.title || '';
-    const parts = [title, artistName].filter(Boolean);
-    const query = parts.length > 0 ? `${parts.join(' - ')} official audio` : '';
+    if (!audioUrl) {
+      audio.pause();
+      audio.src = '';
+      return;
+    }
 
-    if (!query) return;
+    audio.src = audioUrl;
+    audio.load();
 
-    fetchYoutubeSearch(query)
-      .then(videoId => {
-        if (videoId) setYoutubeVideoId(videoId);
-      })
-      .catch(err => console.error("Error fetching youtube id:", err));
-
-  }, [currentTrack, embedKey]);
-
-  // Init Player
-  useEffect(() => {
-    if (!youtubeVideoId || !iframeRef.current) return;
-    
-    let isDestroyed = false;
-
-    const initPlayer = () => {
-      if (isDestroyed) return;
-      if (playerRef.current) playerRef.current.destroy();
-
-      playerRef.current = new window.YT.Player(iframeRef.current, {
-        videoId: youtubeVideoId,
-        playerVars: { autoplay: 1, controls: 0, playsinline: 1 },
-        events: {
-          onReady: (event) => {
-            if (isDestroyed) return;
-            setDuration(event.target.getDuration());
-            
-            // Set seek function in context
-            setSeekTo(() => (ratio) => {
-              if (playerRef.current && playerRef.current.getDuration) {
-                const dur = playerRef.current.getDuration();
-                if (dur) playerRef.current.seekTo(ratio * dur, true);
-              }
-            });
-
-            if (isPlaying) event.target.playVideo();
-            else event.target.pauseVideo();
-          },
-          onStateChange: (event) => {
-            if (isDestroyed) return;
-            if (event.data === window.YT.PlayerState.ENDED) {
-              playNext();
-            }
-          }
+    const onMeta = () => {
+      setDuration(audio.duration);
+      setSeekTo(() => (ratio) => {
+        if (audioEl.current && audioEl.current.duration) {
+          audioEl.current.currentTime = ratio * audioEl.current.duration;
         }
       });
     };
+    const onCanPlay = () => { if (isPlayingRef.current) audio.play().catch(() => {}); };
+    const onTime = () => { if (audio.duration > 0) setProgress(audio.currentTime / audio.duration); };
+    const onEnd = () => playNext();
+    const onError = () => { skipTimerRef.current = setTimeout(playNext, SKIP_DELAY_MS); };
 
-    if (window.YT && window.YT.Player) {
-      initPlayer();
-    } else {
-      window.onYouTubeIframeAPIReady = initPlayer;
-    }
+    audio.addEventListener('loadedmetadata', onMeta);
+    audio.addEventListener('canplay', onCanPlay);
+    audio.addEventListener('timeupdate', onTime);
+    audio.addEventListener('ended', onEnd);
+    audio.addEventListener('error', onError);
+
+    if (isPlayingRef.current) audio.play().catch(() => {});
 
     return () => {
-      isDestroyed = true;
-      if (playerRef.current) {
-        try { playerRef.current.destroy(); } catch (e) {}
-        playerRef.current = null;
-      }
+      audio.removeEventListener('loadedmetadata', onMeta);
+      audio.removeEventListener('canplay', onCanPlay);
+      audio.removeEventListener('timeupdate', onTime);
+      audio.removeEventListener('ended', onEnd);
+      audio.removeEventListener('error', onError);
     };
-  }, [youtubeVideoId]);
+  }, [audioUrl]);
 
-  // Sync Play/Pause
+  // Sync play/pause state from context
   useEffect(() => {
-    if (playerRef.current && playerRef.current.playVideo) {
-      if (isPlaying) playerRef.current.playVideo();
-      else playerRef.current.pauseVideo();
+    const audio = audioEl.current;
+    if (!audio) return;
+    if (isPlaying) {
+      if (audioUrl) audio.play().catch(() => {});
+    } else {
+      audio.pause();
     }
-  }, [isPlaying]);
+  }, [isPlaying, audioUrl]);
 
-  // Track Progress
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (playerRef.current && playerRef.current.getCurrentTime && isPlaying) {
-        const dur = playerRef.current.getDuration();
-        if (dur > 0) {
-          setProgress(playerRef.current.getCurrentTime() / dur);
-        }
-      }
-    }, 250);
-    return () => clearInterval(interval);
-  }, [isPlaying, setProgress]);
-
-  if (!hasQueue || !youtubeVideoId) return null;
-
-  return (
-    <div style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-      <div ref={iframeRef}></div>
-    </div>
-  );
+  // Always render so the element exists before the first play() unlock call
+  return <audio ref={audioEl} style={{ display: 'none' }} preload="auto" />;
 };
 
 export default MusicPlayer;

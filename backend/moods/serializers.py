@@ -80,9 +80,9 @@ class MoodInferenceSerializer(HarmonicBaseSerializer):
 
 
 class AnswerInputSerializer(serializers.Serializer):
-    """Single answer inside a submit payload."""
+    """Single answer inside a submit payload. raw_value may be a string or a list (multi_select)."""
     question_key = serializers.CharField(max_length=64)
-    raw_value = serializers.CharField(max_length=64)
+    raw_value = serializers.JSONField(default="")
 
 
 class SubmitAnswersSerializer(serializers.Serializer):

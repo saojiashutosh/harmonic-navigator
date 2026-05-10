@@ -8,10 +8,20 @@ const ENERGY_BY_VALUE = {
   sharp: 0.75, scattered: 0.85, drifting: 0.30, motivated: 0.85, blank: 0.20,
   // activity
   working: 0.55, exercising: 0.95, relaxing: 0.25, commuting: 0.45, social: 0.80, sleeping: 0.10,
+  // social_setting
+  alone: 0.22, others: 0.72, kids: 0.62, meeting: 0.48,
   // playlist_goal
   focus: 0.55, relax: 0.25, uplift: 0.80, escape: 0.40, party: 0.95, sleep: 0.10,
-  // language / nostalgia neutrals
-  no_preference: 0.50, english: 0.55, hindi: 0.60, marathi: 0.55, punjabi: 0.85,
+  // music_style
+  bollywood: 0.78, hollywood: 0.65, marathi: 0.60, devotional: 0.28,
+  classical: 0.32, pop: 0.76, indie: 0.52, lofi: 0.22,
+  // language
+  no_preference: 0.50, english: 0.55, hindi: 0.60,
+  // time_of_day
+  morning: 0.62, afternoon: 0.55, evening: 0.42, late_night: 0.28,
+  // music_era
+  latest: 0.88, recent: 0.72, era_2010s: 0.55, era_2000s: 0.42, nineties: 0.35,
+  // legacy
   instrumental: 0.35, discover_new: 0.65, old_favorites: 0.40, mix_both: 0.55,
 };
 
@@ -63,6 +73,10 @@ const OPTION_COPY = {
   commuting: 'On the way',
   social: 'With people',
   sleeping: 'Almost asleep',
+  alone: 'Just me and the music',
+  others: 'With people around',
+  kids: 'Family-friendly vibes',
+  meeting: 'Professional setting',
   focus: 'Lock me in',
   relax: 'Help me unwind',
   uplift: 'Lift me up',
@@ -70,10 +84,24 @@ const OPTION_COPY = {
   party: 'Make it a party',
   sleep: 'Send me off',
   no_preference: 'Open to anything',
-  english: 'English',
-  hindi: 'Hindi',
-  marathi: 'Marathi',
-  punjabi: 'Punjabi',
+  english: 'International',
+  hindi: 'Bollywood & beyond',
+  marathi: 'Marathi mandali',
+  bollywood: 'Hindi film & pop',
+  hollywood: 'Western & English',
+  classical: 'Composed & refined',
+  pop: 'Chart-friendly pop',
+  indie: 'Independent & fresh',
+  lofi: 'Study & chill beats',
+  latest: 'Fresh off the charts',
+  recent: 'The last few years',
+  era_2010s: 'The decade of hits',
+  era_2000s: 'Y2K gold',
+  nineties: 'Timeless and retro',
+  morning: 'A bright beginning',
+  afternoon: 'Midday steady',
+  evening: 'Golden hour',
+  late_night: 'After midnight',
   instrumental: 'No words, just music',
   discover_new: 'Surprise me',
   old_favorites: 'Songs that feel like home',

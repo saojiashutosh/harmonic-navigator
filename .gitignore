@@ -10,3 +10,7 @@ __pycache__/
 song_storage.xlsx
 **/migrations/
 staticfiles/
+graphify-out/
+*.csv
+*.md
+*.json

@@ -80,6 +80,54 @@ def get_track(track_url_or_id: str, market: str | None = None) -> dict:
     return _normalise_track_payload(item, audio_features)
 
 
+def get_playlist_tracks(playlist_url_or_id: str, market: str | None = None) -> list[dict]:
+    client = _build_client()
+    market_code = market or os.getenv("SPOTIFY_MARKET", "IN")
+    playlist_id = extract_spotify_playlist_id(playlist_url_or_id)
+
+    try:
+        from spotipy.exceptions import SpotifyException
+
+        results = []
+        offset = 0
+        limit = 100
+        while True:
+            response = client.playlist_items(
+                playlist_id,
+                market=market_code,
+                limit=limit,
+                offset=offset,
+                additional_types=["track"],
+            )
+            for item in response.get("items", []):
+                track = item.get("track")
+                if track and track.get("id") and track.get("type") == "track":
+                    results.append(_normalise_track_payload(track, {}))
+            if response.get("next") is None:
+                break
+            offset += limit
+        return results
+    except SpotifyException as exc:
+        raise SpotifyImportError(f"Spotify playlist request failed: {exc}") from exc
+
+
+def extract_spotify_playlist_id(playlist_url_or_id: str) -> str:
+    value = playlist_url_or_id.strip()
+    if not value:
+        raise SpotifyImportError("Spotify playlist URL or ID is required.")
+
+    parsed = urlparse(value)
+    if parsed.netloc:
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) >= 2 and parts[0] == "playlist":
+            return parts[1].split("?")[0]
+
+    if re.fullmatch(r"[A-Za-z0-9]{22}", value):
+        return value
+
+    raise SpotifyImportError("Invalid Spotify playlist URL or ID.")
+
+
 def extract_spotify_track_id(track_url_or_id: str) -> str:
     value = track_url_or_id.strip()
     if not value:

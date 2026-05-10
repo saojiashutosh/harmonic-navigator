@@ -39,6 +39,7 @@ class ArtistSerializer(HarmonicBaseSerializer):
 
 class TrackSerializer(HarmonicBaseSerializer):
     durationMinutes = serializers.CharField(source="duration_minutes", read_only=True)
+    artistId = ArtistSerializer(read_only=True)
 
     class Meta:
         model = Track
@@ -54,6 +55,8 @@ class TrackSerializer(HarmonicBaseSerializer):
             'fmaId',
             'previewUrl',
             'externalUrl',
+            'streamUrl',
+            'releaseYear',
             'tempoBpm',
             'durationMs',
             'durationMinutes',

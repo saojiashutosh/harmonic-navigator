@@ -129,6 +129,8 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = env("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles"))
 
+GROQ_API_KEY = env("GROQ_API_KEY", "")
+
 DATA_DIR = BASE_DIR / "data"
 SONG_EXCEL_BACKUP_PATH = env("SONG_EXCEL_BACKUP_PATH", str(DATA_DIR / "song_storage.xlsx"))
 
