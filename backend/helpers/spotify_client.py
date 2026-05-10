@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 import re
+import json
+import urllib.request
+import urllib.parse
 from urllib.parse import urlparse
 
 class SpotifyConfigurationError(RuntimeError):
@@ -81,22 +84,31 @@ def get_track(track_url_or_id: str, market: str | None = None) -> dict:
 
 
 def get_playlist_tracks(playlist_url_or_id: str, market: str | None = None) -> list[dict]:
-    client = _build_client()
-    # Don't force a market code for playlist fetches — some playlists 403 with market params.
-    market_code = market or None
     playlist_id = extract_spotify_playlist_id(playlist_url_or_id)
+    market_code = market or os.getenv("SPOTIFY_MARKET", "IN")
 
+    # Try official API first; fall back to web-player token for playlists
+    # that return 403 under client-credentials (editorial / other-user playlists).
+    try:
+        return _playlist_tracks_api(playlist_id, market_code)
+    except SpotifyImportError:
+        pass
+
+    return _playlist_tracks_webplayer(playlist_id)
+
+
+def _playlist_tracks_api(playlist_id: str, market_code: str) -> list[dict]:
+    client = _build_client()
     try:
         from spotipy.exceptions import SpotifyException
 
         results = []
         offset = 0
-        limit = 100
         while True:
             response = client.playlist_items(
                 playlist_id,
                 market=market_code,
-                limit=limit,
+                limit=100,
                 offset=offset,
                 additional_types=["track"],
             )
@@ -106,10 +118,73 @@ def get_playlist_tracks(playlist_url_or_id: str, market: str | None = None) -> l
                     results.append(_normalise_track_payload(track, {}))
             if response.get("next") is None:
                 break
-            offset += limit
+            offset += 100
         return results
     except SpotifyException as exc:
         raise SpotifyImportError(f"Spotify playlist request failed: {exc}") from exc
+
+
+def _get_webplayer_token() -> str:
+    """Fetch the anonymous access token that Spotify's own web player uses.
+
+    This token works for public playlists including editorial/Spotify-owned ones
+    that the developer-credentials flow can't access (403).
+    """
+    url = "https://open.spotify.com/get_access_token?reason=transport&productType=web_player"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            token = data.get("accessToken")
+            if not token:
+                raise SpotifyImportError("Web player token endpoint returned no token.")
+            return token
+    except Exception as exc:
+        raise SpotifyImportError(f"Could not obtain Spotify web-player token: {exc}") from exc
+
+
+def _playlist_tracks_webplayer(playlist_id: str) -> list[dict]:
+    """Fetch playlist tracks using Spotify's web-player anonymous token."""
+    token = _get_webplayer_token()
+    results = []
+    url = (
+        f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks"
+        f"?limit=100&offset=0&additional_types=track"
+    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+    }
+
+    while url:
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                page = json.loads(resp.read())
+        except Exception as exc:
+            raise SpotifyImportError(f"Web-player playlist fetch failed: {exc}") from exc
+
+        for item in page.get("items", []):
+            track = item.get("track")
+            if track and track.get("id") and track.get("type") == "track":
+                results.append(_normalise_track_payload(track, {}))
+
+        url = page.get("next")
+
+    return results
 
 
 def extract_spotify_playlist_id(playlist_url_or_id: str) -> str:
