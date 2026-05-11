@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import random
 import re
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q
+
+from helpers.cache_utils import CANDIDATE_POOL_TTL, pool_cache_key
 
 from feedback.models import TrackMoodScore, UserMoodPreference
 from moods.constants import MUSIC_PREFERENCE_OVERRIDES
@@ -20,6 +23,96 @@ def build_playlist_for_session(
     *,
     limit: int = DEFAULT_PLAYLIST_SIZE,
 ) -> Playlist:
+    inference, answer_map, chosen_tracks = _build_scored_tracklist(
+        session, limit=limit
+    )
+    music_preference = answer_map.get("music_preference")
+
+    with transaction.atomic():
+        playlist = Playlist.objects.create(
+            userId=session.userId,
+            moodInferenceId=inference,
+            moodLabel=inference.moodLabel,
+            confidence=inference.confidence,
+            status=Playlist.StatusChoices.READY if chosen_tracks else Playlist.StatusChoices.FAILED,
+            trackCount=len(chosen_tracks),
+        )
+        PlaylistTrack.objects.bulk_create(
+            [
+                PlaylistTrack(
+                    playlistId=playlist,
+                    trackId=track,
+                    position=index,
+                    selectionReason=_selection_reason(
+                        track=track,
+                        mood_label=inference.moodLabel,
+                        music_preference=music_preference,
+                    ),
+                    relevanceScore=score,
+                )
+                for index, (track, score) in enumerate(chosen_tracks, start=1)
+            ]
+        )
+
+    return playlist
+
+
+def expand_playlist(playlist: Playlist, *, extra: int) -> Playlist:
+    """Append `extra` more tracks to an existing playlist.
+
+    Requires the caller to have verified the user is authenticated.
+    Tracks already in the playlist are excluded from the new batch.
+    """
+    session = playlist.moodInferenceId.moodSessionId
+
+    existing_ids = frozenset(
+        PlaylistTrack.objects.filter(playlistId=playlist)
+        .values_list("trackId_id", flat=True)
+    )
+    current_count = playlist.trackCount or len(existing_ids)
+
+    inference, answer_map, chosen_tracks = _build_scored_tracklist(
+        session, limit=extra, exclude_ids=existing_ids
+    )
+    if not chosen_tracks:
+        return playlist
+
+    music_preference = answer_map.get("music_preference")
+
+    with transaction.atomic():
+        PlaylistTrack.objects.bulk_create(
+            [
+                PlaylistTrack(
+                    playlistId=playlist,
+                    trackId=track,
+                    position=current_count + index,
+                    selectionReason=_selection_reason(
+                        track=track,
+                        mood_label=inference.moodLabel,
+                        music_preference=music_preference,
+                    ),
+                    relevanceScore=score,
+                )
+                for index, (track, score) in enumerate(chosen_tracks, start=1)
+            ]
+        )
+        playlist.trackCount = current_count + len(chosen_tracks)
+        playlist.save(update_fields=["trackCount"])
+
+    return playlist
+
+
+def _build_scored_tracklist(
+    session: MoodSession,
+    *,
+    limit: int,
+    exclude_ids: frozenset = frozenset(),
+) -> tuple:
+    """Score and select tracks for a session. Returns (inference, answer_map, [(track, score)]).
+
+    Pure computation — does not write to the DB.
+    Pass exclude_ids to omit tracks already in a playlist (used by expand_playlist).
+    """
     inference = MoodInference.objects.filter(moodSessionId=session).first()
     if inference is None:
         raise ValueError("Mood session has no inference yet.")
@@ -35,17 +128,21 @@ def build_playlist_for_session(
     playlist_goal = answer_map.get("playlist_goal")
     preferred_artist = answer_map.get("preferred_artist")
     era_preference = answer_map.get("music_era")
+    time_of_day = answer_map.get("time_of_day")
     type_weights = _resolve_type_weights(
         user_id=session.userId_id,
         mood_label=inference.moodLabel,
         music_preference=music_preference,
     )
 
-    # Anxious users benefit from calm/grounding music — remap for playlist purposes.
-    # The mood label shown in the UI stays "anxious"; only the track selection uses "calm".
-    playlist_mood = "calm" if inference.moodLabel == "anxious" else inference.moodLabel
-
-    # Use secondary mood for diversity mixing
+    # Sleep goal: always serve calm/gentle tracks regardless of inferred mood.
+    # Anxious: remap to calm for grounding music (UI label unchanged).
+    if playlist_goal == "sleep":
+        playlist_mood = "calm"
+    elif inference.moodLabel == "anxious":
+        playlist_mood = "calm"
+    else:
+        playlist_mood = inference.moodLabel
     secondary_mood = getattr(inference, "secondaryMoodLabel", None)
     mood_blend_ratio = getattr(inference, "moodBlendRatio", 1.0) or 1.0
 
@@ -60,6 +157,9 @@ def build_playlist_for_session(
         era_preference=era_preference,
         limit=limit,
     )
+    if exclude_ids:
+        candidate_tracks = [t for t in candidate_tracks if t.id not in exclude_ids]
+
     feedback_map = _feedback_score_map(
         user_id=session.userId_id,
         mood_label=inference.moodLabel,
@@ -86,12 +186,22 @@ def build_playlist_for_session(
             playlist_goal=playlist_goal,
             preferred_artist=preferred_artist,
             era_preference=era_preference,
+            time_of_day=time_of_day,
             feedback_map=feedback_map,
             mood_tag_ids=mood_tag_ids,
         )
         scored_tracks.append((track, relevance_score))
 
     scored_tracks.sort(key=lambda item: item[1], reverse=True)
+
+    # ── Hard era filter: if enough era-matched tracks exist, exclude others ──
+    if era_preference and era_preference != "no_preference":
+        era_matched = [
+            (t, s) for t, s in scored_tracks
+            if _track_matches_era(t, era_preference)
+        ]
+        if len(era_matched) >= max(limit // 2, 3):
+            scored_tracks = era_matched
 
     # ── Deduplicate by base title (strip Remix/Lofi/From… variants) ───
     seen_base: set[str] = set()
@@ -105,9 +215,6 @@ def build_playlist_for_session(
     scored_tracks = deduped
 
     # ── Secondary mood diversity mixing ───────────────────────────────
-    # When blend ratio < 1.0, reserve slots for secondary-mood tracks.
-    # We use a loose match: tracks whose primaryMood OR a mood tag matches
-    # the secondary mood, so we don't depend on primaryMood being set correctly.
     if secondary_mood and mood_blend_ratio < 1.0:
         diversity_slots = max(1, int(limit * (1 - mood_blend_ratio) * 0.4))
         secondary_tag_ids = mood_tag_ids.get(secondary_mood, set())
@@ -133,34 +240,7 @@ def build_playlist_for_session(
     else:
         chosen_tracks = scored_tracks[:limit]
 
-    with transaction.atomic():
-        playlist = Playlist.objects.create(
-            userId=session.userId,
-            moodInferenceId=inference,
-            moodLabel=inference.moodLabel,
-            confidence=inference.confidence,
-            status=Playlist.StatusChoices.READY if chosen_tracks else Playlist.StatusChoices.FAILED,
-            trackCount=len(chosen_tracks),
-        )
-
-        PlaylistTrack.objects.bulk_create(
-            [
-                PlaylistTrack(
-                    playlistId=playlist,
-                    trackId=track,
-                    position=index,
-                    selectionReason=_selection_reason(
-                        track=track,
-                        mood_label=inference.moodLabel,
-                        music_preference=music_preference,
-                    ),
-                    relevanceScore=score,
-                )
-                for index, (track, score) in enumerate(chosen_tracks, start=1)
-            ]
-        )
-
-    return playlist
+    return inference, answer_map, chosen_tracks
 
 
 def _build_candidate_pool(
@@ -175,6 +255,23 @@ def _build_candidate_pool(
     era_preference: str | None = None,
     limit: int,
 ) -> list[Track]:
+    key = pool_cache_key(
+        mood_label=mood_label,
+        secondary_mood=secondary_mood,
+        social_setting=social_setting,
+        music_language=music_language,
+        music_style=music_style,
+        music_preference=music_preference,
+        preferred_artist=preferred_artist,
+        era_preference=era_preference,
+    )
+    cached = cache.get(key)
+    if cached is not None:
+        # Reshuffle the cached pool so each session gets a different ordering
+        # before scoring — the ±0.04 jitter alone isn't enough for full variety.
+        random.shuffle(cached)
+        return cached
+
     base_qs = Track.objects.select_related("artistId").filter(
         isActive=True,
     ).filter(Q(releaseYear__isnull=True) | Q(releaseYear__gte=1996))
@@ -252,8 +349,10 @@ def _build_candidate_pool(
             seen_ids.add(track_id)
             selected.append(track)
             if len(selected) >= pool_size:
+                cache.set(key, selected, CANDIDATE_POOL_TTL)
                 return selected
 
+    cache.set(key, selected, CANDIDATE_POOL_TTL)
     return selected
 
 
@@ -326,6 +425,7 @@ def _score_track(
     playlist_goal: str | None,
     preferred_artist: str | None,
     era_preference: str | None = None,
+    time_of_day: str | None = None,
     feedback_map: dict[str, float],
     mood_tag_ids: dict[str, set[str]] | None = None,
 ) -> float:
@@ -371,6 +471,7 @@ def _score_track(
         music_style=music_style,
         playlist_goal=playlist_goal,
         preferred_artist=preferred_artist,
+        time_of_day=time_of_day,
     )
 
     score += _era_score(track=track, era_preference=era_preference)
@@ -396,6 +497,7 @@ def _taste_score(
     music_style: str | None,
     playlist_goal: str | None,
     preferred_artist: str | None,
+    time_of_day: str | None = None,
 ) -> float:
     score = 0.0
     language = _normalise(track.language)
@@ -462,13 +564,25 @@ def _taste_score(
     if requested_goal == "focus" and track.primaryMood == "focused":
         score += 0.18
     elif requested_goal in {"relax", "sleep"} and track.primaryMood == "calm":
-        score += 0.20
+        score += 0.30
+    elif requested_goal == "sleep" and track.energy is not None and track.energy > 0.55:
+        score -= 0.30
     elif requested_goal == "uplift" and track.primaryMood in {"energized", "celebratory"}:
         score += 0.18
     elif requested_goal == "escape" and track.primaryMood in {"calm", "melancholic"}:
         score += 0.16
     elif requested_goal == "party" and track.primaryMood == "celebratory":
         score += 0.22
+
+    tod = _normalise(time_of_day)
+    if tod == "late_night":
+        if track.primaryMood == "calm" or (track.energy is not None and track.energy <= 0.35):
+            score += 0.14
+        if track.energy is not None and track.energy > 0.65:
+            score -= 0.20
+    elif tod == "morning":
+        if track.primaryMood in {"energized", "focused"}:
+            score += 0.10
 
     artist_query = _normalise(preferred_artist)
     if artist_query and artist_query not in {"any", "none", "no_preference"}:
@@ -506,6 +620,25 @@ def _era_score(*, track: Track, era_preference: str | None) -> float:
     # Wrong era — penalty must exceed the max positive mood score (+0.50) so
     # correct-era tracks always dominate regardless of mood match strength.
     return -0.70
+
+
+def _track_matches_era(track: Track, era_preference: str | None) -> bool:
+    year = track.releaseYear
+    if not era_preference or era_preference == "no_preference":
+        return True
+    if year is None:
+        return False
+    if era_preference == "latest":
+        return year >= 2024
+    if era_preference == "recent":
+        return 2020 <= year <= 2023
+    if era_preference == "era_2010s":
+        return 2010 <= year <= 2019
+    if era_preference == "era_2000s":
+        return 2000 <= year <= 2009
+    if era_preference == "nineties":
+        return 1996 <= year < 2000
+    return True
 
 
 def _era_query(era_preference: str | None) -> Q:

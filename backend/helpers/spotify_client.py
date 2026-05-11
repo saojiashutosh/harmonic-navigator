@@ -7,6 +7,15 @@ import urllib.request
 import urllib.parse
 from urllib.parse import urlparse
 
+from django.core.cache import cache
+
+from helpers.cache_utils import (
+    SPOTIFY_SEARCH_TTL,
+    SPOTIFY_TRACK_TTL,
+    spotify_search_cache_key,
+    spotify_track_cache_key,
+)
+
 class SpotifyConfigurationError(RuntimeError):
     """Raised when Spotify credentials are missing."""
 
@@ -22,8 +31,13 @@ def get_access_token() -> str:
 
 
 def search_tracks(query: str, limit: int = 20, market: str | None = None) -> list[dict]:
-    client = _build_client()
     market_code = market or os.getenv("SPOTIFY_MARKET", "IN")
+    key = spotify_search_cache_key(query, limit, market_code)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    client = _build_client()
 
     try:
         from spotipy.exceptions import SpotifyException
@@ -54,15 +68,22 @@ def search_tracks(query: str, limit: int = 20, market: str | None = None) -> lis
         if feature and feature.get("id")
     }
 
-    return [
+    results = [
         _normalise_track_payload(item, feature_map.get(item.get("id")))
         for item in track_items
     ]
+    cache.set(key, results, SPOTIFY_SEARCH_TTL)
+    return results
 
 
 def get_track(track_url_or_id: str, market: str | None = None) -> dict:
-    client = _build_client()
     track_id = extract_spotify_track_id(track_url_or_id)
+    key = spotify_track_cache_key(track_id)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+
+    client = _build_client()
     market_code = market or os.getenv("SPOTIFY_MARKET", "IN")
 
     try:
@@ -80,7 +101,9 @@ def get_track(track_url_or_id: str, market: str | None = None) -> dict:
     # except SpotifyException:
     #     audio_features = {}
 
-    return _normalise_track_payload(item, audio_features)
+    result = _normalise_track_payload(item, audio_features)
+    cache.set(key, result, SPOTIFY_TRACK_TTL)
+    return result
 
 
 def get_playlist_tracks(playlist_url_or_id: str, market: str | None = None) -> list[dict]:
@@ -247,6 +270,14 @@ def _build_client() -> "Spotify":
 def _normalise_track_payload(item: dict, audio_features: dict | None) -> dict:
     artist = (item.get("artists") or [{}])[0]
     external_urls = item.get("external_urls") or {}
+    album = item.get("album") or {}
+    release_date = album.get("release_date") or item.get("release_date") or ""
+    release_year = None
+    if release_date:
+        try:
+            release_year = int(str(release_date)[:4])
+        except (ValueError, TypeError):
+            pass
 
     return {
         "spotify_id": item.get("id"),
@@ -259,5 +290,6 @@ def _normalise_track_payload(item: dict, audio_features: dict | None) -> dict:
         "external_url": external_urls.get("spotify"),
         "duration_ms": item.get("duration_ms"),
         "is_explicit": bool(item.get("explicit", False)),
+        "release_year": release_year,
         "audio_features": audio_features or {},
     }

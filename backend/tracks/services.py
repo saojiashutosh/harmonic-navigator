@@ -85,6 +85,7 @@ def import_spotify_track(payload: dict, metadata: dict | None = None) -> Track:
             "classicalForm": metadata.get("classicalForm"),
             "isActive": True,
             "featuresSyncedAt": timezone.now() if audio_features else None,
+            "releaseYear": payload.get("release_year"),
         }
 
         track, _ = Track.objects.update_or_create(
@@ -98,7 +99,12 @@ def import_spotify_track(payload: dict, metadata: dict | None = None) -> Track:
                 snapshot=audio_features,
             )
 
-        transaction.on_commit(lambda: sync_track_to_excel(track))
+        def _sync(t=track):
+            try:
+                sync_track_to_excel(t)
+            except Exception:
+                pass
+        transaction.on_commit(_sync)
 
     return track
 

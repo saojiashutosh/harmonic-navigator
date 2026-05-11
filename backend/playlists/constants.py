@@ -1,4 +1,7 @@
 DEFAULT_PLAYLIST_SIZE = 20
+GUEST_PLAYLIST_SIZE = 15        # max tracks for anonymous users
+REGISTERED_PLAYLIST_SIZE = 60   # tracks for logged-in users
+EXPAND_COUNT = 40               # extra tracks added via expand
 
 MOOD_TYPE_RATIOS = {
     "energized": {"song": 0.65, "instrumental": 0.25, "ambient": 0.10},
