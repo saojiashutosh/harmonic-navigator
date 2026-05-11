@@ -1,13 +1,66 @@
 const BASE_URL = 'http://localhost:8000';
 
-const headers = {
-  'Content-Type': 'application/json',
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+const getToken = () => localStorage.getItem('hn_token');
+
+const authHeaders = () => {
+  const token = getToken();
+  return token ? { ...JSON_HEADERS, Authorization: `Token ${token}` } : JSON_HEADERS;
 };
 
-/**
- * Fetch all active mood questions.
- * GET /moods/questions/
- */
+const storeToken = (token) => {
+  if (token) localStorage.setItem('hn_token', token);
+  else localStorage.removeItem('hn_token');
+};
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+export const registerUser = async ({ email, password, firstName, lastName }) => {
+  const res = await fetch(`${BASE_URL}/users/auth/register/`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ email, password, firstName, lastName }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || 'Registration failed.');
+  storeToken(data.token);
+  return data.user;
+};
+
+export const loginUser = async ({ email, password }) => {
+  const res = await fetch(`${BASE_URL}/users/auth/login/`, {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || 'Login failed.');
+  storeToken(data.token);
+  return data.user;
+};
+
+export const logoutUser = async () => {
+  const token = getToken();
+  if (token) {
+    await fetch(`${BASE_URL}/users/auth/logout/`, {
+      method: 'POST',
+      headers: authHeaders(),
+    }).catch(() => {});
+  }
+  storeToken(null);
+};
+
+export const fetchMe = async () => {
+  const token = getToken();
+  if (!token) throw new Error('No token');
+  const res = await fetch(`${BASE_URL}/users/auth/me/`, { headers: authHeaders() });
+  if (!res.ok) { storeToken(null); throw new Error('Session expired'); }
+  return res.json();
+};
+
+// ── Moods & Playlists ─────────────────────────────────────────────────────────
+
 export const fetchQuestions = async () => {
   const res = await fetch(`${BASE_URL}/moods/questions/?limit=100`);
   if (!res.ok) throw new Error(`Failed to fetch questions: ${res.status}`);
@@ -15,28 +68,22 @@ export const fetchQuestions = async () => {
   return Array.isArray(data) ? data : data.results ?? [];
 };
 
-/**
- * Create a new mood session.
- * POST /moods/mood-sessions/
- * Returns: { id, moodSessionId, ... }
- */
 export const createMoodSession = async () => {
   const res = await fetch(`${BASE_URL}/moods/mood-sessions/`, {
     method: 'POST',
-    headers,
+    headers: authHeaders(),
     body: JSON.stringify({}),
   });
-  if (!res.ok) throw new Error(`Failed to create mood session: ${res.status}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const err = new Error(data.detail || `Failed to create mood session: ${res.status}`);
+    err.status = res.status;
+    err.code = data.code;
+    throw err;
+  }
   return res.json();
 };
 
-/**
- * Submit answers for a mood session.
- * POST /moods/mood-sessions/{id}/submit/
- * @param {string} sessionId - The mood session UUID
- * @param {Object} answersMap - { question_key: raw_value, ... }
- * Returns: { id, moodLabel, confidence, rawScores, moodSessionId }
- */
 export const submitAnswers = async (sessionId, answersMap) => {
   const answers = Object.entries(answersMap)
     .filter(([, raw_value]) => Array.isArray(raw_value) ? raw_value.length > 0 : true)
@@ -47,27 +94,29 @@ export const submitAnswers = async (sessionId, answersMap) => {
 
   const res = await fetch(`${BASE_URL}/moods/mood-sessions/${sessionId}/submit/`, {
     method: 'POST',
-    headers,
+    headers: authHeaders(),
     body: JSON.stringify({ answers }),
   });
   if (!res.ok) throw new Error(`Failed to submit answers: ${res.status}`);
   return res.json();
 };
 
-/**
- * Generate a playlist from a mood session.
- * POST /playlists/playlists/generate/
- * @param {string} moodSessionId - The mood session UUID
- * @param {number} limit - Number of tracks (default 10)
- * Returns: { id, moodLabel, confidence, trackCount, status }
- */
 export const generatePlaylist = async (moodSessionId, limit = 10) => {
   const res = await fetch(`${BASE_URL}/playlists/playlists/generate/`, {
     method: 'POST',
-    headers,
+    headers: authHeaders(),
     body: JSON.stringify({ moodSessionId, limit }),
   });
   if (!res.ok) throw new Error(`Failed to generate playlist: ${res.status}`);
+  return res.json();
+};
+
+export const expandPlaylist = async (playlistId) => {
+  const res = await fetch(`${BASE_URL}/playlists/playlists/${playlistId}/expand/`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to expand playlist: ${res.status}`);
   return res.json();
 };
 
@@ -76,8 +125,10 @@ export const generatePlaylist = async (moodSessionId, limit = 10) => {
  * GET /playlists/playlist-tracks/?playlistId={id}
  * Returns: Array of playlist track objects (each includes a `track` sub-object)
  */
-export const fetchPlaylistTracks = async (playlistId) => {
-  const res = await fetch(`${BASE_URL}/playlists/playlist-tracks/?playlistId=${playlistId}&ordering=position`);
+export const fetchPlaylistTracks = async (playlistId, { offset = 0, limit = 200 } = {}) => {
+  const res = await fetch(
+    `${BASE_URL}/playlists/playlist-tracks/?playlistId=${playlistId}&ordering=position&limit=${limit}&offset=${offset}`
+  );
   if (!res.ok) throw new Error(`Failed to fetch playlist tracks: ${res.status}`);
   const data = await res.json();
   return Array.isArray(data) ? data : data.results ?? [];

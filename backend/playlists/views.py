@@ -11,14 +11,15 @@ except ImportError:
 from cryptography.hazmat.primitives.ciphers import Cipher, modes
 from rest_framework import status
 from rest_framework.decorators import action, api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from harmonic_navigator.views import HarmonicBaseViewSet
 from moods.models import MoodSession
 
 from . import filters, models, serializers
-from .services import build_playlist_for_session
+from .constants import EXPAND_COUNT, GUEST_PLAYLIST_SIZE, REGISTERED_PLAYLIST_SIZE
+from .services import build_playlist_for_session, expand_playlist
 
 
 class PlaylistViewSet(HarmonicBaseViewSet):
@@ -46,11 +47,14 @@ class PlaylistViewSet(HarmonicBaseViewSet):
         except MoodSession.DoesNotExist:
             return Response({"detail": "Mood session not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        # Playlist size is determined by auth status, not the frontend request.
+        if request.user.is_anonymous:
+            limit = GUEST_PLAYLIST_SIZE
+        else:
+            limit = REGISTERED_PLAYLIST_SIZE
+
         try:
-            playlist = build_playlist_for_session(
-                session,
-                limit=serializer.validated_data["limit"],
-            )
+            playlist = build_playlist_for_session(session, limit=limit)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -58,6 +62,28 @@ class PlaylistViewSet(HarmonicBaseViewSet):
             self.get_serializer(playlist).data,
             status=status.HTTP_201_CREATED,
         )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="expand",
+        permission_classes=[IsAuthenticated],
+    )
+    def expand(self, request, pk=None):
+        """Add EXPAND_COUNT more tracks to an existing playlist.
+
+        Requires authentication. Works for both guest-created and
+        user-owned playlists so users can expand a playlist they
+        generated before logging in.
+        """
+        playlist = self.get_object()
+
+        try:
+            playlist = expand_playlist(playlist, extra=EXPAND_COUNT)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(self.get_serializer(playlist).data, status=status.HTTP_200_OK)
 
 
 class PlaylistTrackViewSet(HarmonicBaseViewSet):
@@ -142,25 +168,74 @@ def saavn_search(request):
     if not query:
         return Response({"error": "Query parameter 'q' is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    def _fetch_song(q):
-        """Try search.getResults (finds regional songs); returns song dict or None."""
+    def _fetch_songs(q, n=8):
+        """Return top-n JioSaavn results for query q."""
         r = requests.get(
             'https://www.jiosaavn.com/api.php',
             params={'__call': 'search.getResults', 'q': q, 'p': 1,
-                    'q_format': '1', '_format': 'json', '_marker': '0'},
+                    'q_format': '1', '_format': 'json', '_marker': '0', 'n': n},
             headers=_SAAVN_HEADERS, timeout=10,
         )
         r.raise_for_status()
-        results = r.json().get('results') or []
-        return results[0] if results else None
+        return r.json().get('results') or []
+
+    def _words(text):
+        return set(re.sub(r'[^\w\s]', '', (text or '').lower()).split())
+
+    def _score_result(result, target_title_words, target_artist_words):
+        song_title = result.get('song') or result.get('title') or ''
+        song_artist = result.get('primary_artists') or result.get('singers') or ''
+        title_words = _words(song_title)
+        artist_words = _words(song_artist)
+        if not title_words or not target_title_words:
+            return 0.0
+        title_overlap = len(target_title_words & title_words) / max(len(target_title_words), len(title_words))
+        artist_bonus = 0.25 if (target_artist_words and target_artist_words & artist_words) else 0.0
+        return title_overlap + artist_bonus
+
+    def _best_match(candidates, target_title_words, target_artist_words):
+        if not candidates:
+            return None
+        scored = [(c, _score_result(c, target_title_words, target_artist_words)) for c in candidates]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[0][0]
+
+    # Determine what to match against — prefer DB title/artist over raw query
+    if track:
+        _target_title = track.title or query
+        _target_artist = track.artistId.name if track.artistId else ''
+    else:
+        _target_title = query
+        _target_artist = ''
+
+    _title_words = _words(_target_title)
+    _artist_words = _words(_target_artist)
 
     try:
-        song = _fetch_song(query)
+        # Search title-only first (avoids artist name polluting results),
+        # then also search title+artist; combine and pick the best title match.
+        candidates = _fetch_songs(_target_title)
+        if _target_artist:
+            combined_q = f"{_target_title} {_target_artist}"
+            if combined_q != query:
+                candidates += _fetch_songs(combined_q)
+        elif query != _target_title:
+            candidates += _fetch_songs(query)
 
-        # Retry with title only (drop artist name) if full query fails
+        # Deduplicate by song id
+        seen, unique = set(), []
+        for c in candidates:
+            sid = c.get('id') or c.get('song_id') or ''
+            if sid not in seen:
+                seen.add(sid)
+                unique.append(c)
+
+        song = _best_match(unique, _title_words, _artist_words)
+
+        # Fallback: if no candidates at all, try dropping artist from original query
         if not song and ' ' in query:
-            short = query.rsplit(' ', 1)[0]  # drop last word
-            song = _fetch_song(short)
+            short = query.rsplit(' ', 1)[0]
+            song = _best_match(_fetch_songs(short), _title_words, _artist_words)
 
         if not song:
             return Response({"error": "No results found."}, status=status.HTTP_404_NOT_FOUND)

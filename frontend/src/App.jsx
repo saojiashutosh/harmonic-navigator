@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './index.css';
 import { PlayerProvider, usePlayer } from './components/PlayerContext';
 import MusicPlayer from './components/MusicPlayer';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import AuthModal from './components/AuthModal';
 import * as API from './api';
 import HS from './utils/HarmonicShared';
 
@@ -247,6 +249,8 @@ function PaperBackdrop() {
 
 /* ── Header ──────────────────────────────────────────────── */
 function Header({ onHome, view }) {
+  const { user, logout, openAuth } = useAuth();
+
   return (
     <header className="og-header">
       <button className="og-logo" onClick={onHome}>
@@ -258,7 +262,16 @@ function Header({ onHome, view }) {
         <span>Field notes</span>
         <span>About</span>
       </nav>
-      <span className="og-meta">a quiet field guide · vol. i</span>
+      <div className="og-header-auth">
+        {user ? (
+          <>
+            <span className="og-auth-name">{user.firstName}</span>
+            <button className="og-btn og-btn-ghost og-btn-sm" onClick={logout}>sign out</button>
+          </>
+        ) : (
+          <button className="og-btn og-btn-ghost og-btn-sm" onClick={() => openAuth('signin')}>sign in</button>
+        )}
+      </div>
     </header>
   );
 }
@@ -389,8 +402,9 @@ const MARGINALIA = [
   'the colour of this hour',
 ];
 
-function MoodCard({ onComplete }) {
+function MoodCard({ onComplete, onGuestLimit }) {
   const { closePlayer } = usePlayer();
+  const { openAuth } = useAuth();
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
@@ -407,7 +421,16 @@ function MoodCard({ onComplete }) {
         const [qs, sess] = await Promise.all([API.fetchQuestions(), API.createMoodSession()]);
         if (cancelled) return;
         setQuestions(qs); setSessionId(sess.id); setLoading(false);
-      } catch { if (!cancelled) { setError('Could not load.'); setLoading(false); } }
+      } catch (err) {
+        if (cancelled) return;
+        if (err.status === 403 && err.code === 'GUEST_LIMIT_REACHED') {
+          openAuth('signup', 'You\'ve used your 2 free sessions. Sign up to keep listening — 60 tracks, unlimited sessions.');
+          if (onGuestLimit) onGuestLimit();
+          return;
+        }
+        setError('Could not load.');
+        setLoading(false);
+      }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -441,7 +464,7 @@ function MoodCard({ onComplete }) {
       const inf = await API.submitAnswers(sessionId, answers);
       const pl = await API.generatePlaylist(inf.moodSessionId, 15);
       const tracks = await API.fetchPlaylistTracks(pl.id);
-      onComplete({ moodLabel: inf.moodLabel, confidence: inf.confidence, tracks: tracks.map(t => t.track) });
+      onComplete({ moodLabel: inf.moodLabel, confidence: inf.confidence, tracks: tracks.map(t => t.track), playlistId: pl.id });
     } catch (err) { setError('Failed: ' + err.message); setSubmitting(false); submittedRef.current = false; }
   };
 
@@ -627,7 +650,12 @@ function MoodSigil({ mood, drawIn = true, size }) {
 function Results({ results, onRestart }) {
   const { loadPlaylist, jumpTo, isPlaying, currentTrack, queue } = usePlayer();
   const meta = HS.moodMeta(results?.moodLabel);
-  const tracks = results?.tracks || [];
+  const initialTracks = results?.tracks || [];
+  // Use the live queue so expanded tracks appear immediately in the list.
+  // Only substitute when the queue belongs to this playlist (same first track).
+  const tracks = (queue.length > 0 && initialTracks.length > 0 && queue[0]?.id === initialTracks[0]?.id)
+    ? queue
+    : initialTracks;
   const conf = Math.round((results?.confidence || 0) * 100);
 
   const handlePlay = (i) => {
@@ -674,8 +702,27 @@ function Results({ results, onRestart }) {
 }
 
 /* ── Player strip ──────────────────────────────────────── */
-function PlayerStrip() {
-  const { currentTrack: track, queue, currentIndex, isPlaying, isLoadingAudio, togglePlay, playNext, playPrevious, closePlayer, moodLabel, progress, seekTo } = usePlayer();
+function PlayerStrip({ onNewSession, playlistId }) {
+  const { currentTrack: track, queue, currentIndex, isPlaying, isLoadingAudio, togglePlay, playNext, playPrevious, closePlayer, appendToQueue, moodLabel, progress, seekTo } = usePlayer();
+  const { user, openAuth } = useAuth();
+  const [expanding, setExpanding] = useState(false);
+
+  const isLastTrack = queue.length > 0 && currentIndex === queue.length - 1;
+
+  const handleExpand = async () => {
+    if (!playlistId || expanding) return;
+    setExpanding(true);
+    try {
+      const currentCount = queue.length;
+      await API.expandPlaylist(playlistId);
+      const newTracks = await API.fetchPlaylistTracks(playlistId, { offset: currentCount, limit: 40 });
+      appendToQueue(newTracks.map(t => t.track));
+    } catch (e) {
+      console.error('expand failed', e);
+    } finally {
+      setExpanding(false);
+    }
+  };
 
   const [tick, setTick] = useState(0);
 
@@ -718,6 +765,30 @@ function PlayerStrip() {
   return (
     <div className="og-player">
       <div className="og-player-glow" />
+      {isLastTrack && (
+        <div className="og-player-end">
+          <span className="og-player-end-label">last track</span>
+          <div className="og-player-end-actions">
+            {user ? (
+              <button
+                className="og-btn og-btn-primary"
+                onClick={handleExpand}
+                disabled={expanding}
+              >
+                {expanding ? 'adding…' : '+ 40 more ▸'}
+              </button>
+            ) : (
+              <button
+                className="og-btn og-btn-primary"
+                onClick={() => openAuth('signin', 'Sign in to unlock 40 more tracks from this playlist.')}
+              >
+                sign in for more ▸
+              </button>
+            )}
+            <button className="og-btn og-btn-ghost" onClick={onNewSession}>new session</button>
+          </div>
+        </div>
+      )}
       <div className="og-player-inner">
         <div className="og-player-mood"><span className="og-pdot" />{(meta?.label || moodLabel || 'playing').toLowerCase()}</div>
         <div className="og-player-track">
@@ -739,7 +810,6 @@ function PlayerStrip() {
             <path d="M 0 -3 L 0 -8 L 4 -4 L 0 -4" fill="var(--accent)" />
           </g>
         </svg>
-
         <div className="og-player-controls">
           <button onClick={playPrevious} disabled={currentIndex === 0 || isLoadingAudio}>‹‹</button>
           <button onClick={togglePlay} className="og-pp" disabled={isLoadingAudio}>{playIcon}</button>
@@ -757,11 +827,17 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
   const [results, setResults] = useState(null);
   const { closePlayer } = usePlayer();
 
-  const onComplete = (data) => { 
-    setResults(data); 
-    setView('results'); 
+  const onComplete = (data) => {
+    setResults(data);
+    setView('results');
   };
-  
+
+  const handleNewSession = () => {
+    closePlayer();
+    setResults(null);
+    setView('home');
+  };
+
   return (
     <div className={`og-shell density-${density} palette-${palette} type-${typeStyle}`}>
       <AmbientLayer />
@@ -769,19 +845,27 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
       <Header view={view} onHome={() => { setView('home'); setResults(null); }} />
       <main className={`og-main view-${view}`}>
         {view === 'home' && <Landing onStart={() => setView('mood')} />}
-        {view === 'mood' && <MoodCard onComplete={onComplete} />}
+        {view === 'mood' && (
+          <MoodCard
+            onComplete={onComplete}
+            onGuestLimit={() => setView('home')}
+          />
+        )}
         {view === 'results' && <Results results={results} onRestart={() => { setView('home'); setResults(null); }} />}
       </main>
-      <PlayerStrip />
+      <PlayerStrip onNewSession={handleNewSession} playlistId={results?.playlistId} />
       <MusicPlayer />
+      <AuthModal />
     </div>
   );
 }
 
 export default function App() {
   return (
-    <PlayerProvider>
-      <HarmonicOrganic />
-    </PlayerProvider>
+    <AuthProvider>
+      <PlayerProvider>
+        <HarmonicOrganic />
+      </PlayerProvider>
+    </AuthProvider>
   );
 }

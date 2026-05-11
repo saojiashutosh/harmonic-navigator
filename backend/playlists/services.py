@@ -194,6 +194,18 @@ def _build_scored_tracklist(
 
     scored_tracks.sort(key=lambda item: item[1], reverse=True)
 
+    # ── Hard language filter: never serve wrong-language tracks when language is set ──
+    requested_languages = _parse_language_pref(music_language)
+    if requested_languages:
+        lang_matched = [
+            (t, s) for t, s in scored_tracks
+            if _track_matches_language(t, requested_languages)
+        ]
+        if lang_matched:
+            scored_tracks = lang_matched
+        else:
+            scored_tracks = []
+
     # ── Hard era filter: if enough era-matched tracks exist, exclude others ──
     if era_preference and era_preference != "no_preference":
         era_matched = [
@@ -620,6 +632,22 @@ def _era_score(*, track: Track, era_preference: str | None) -> float:
     # Wrong era — penalty must exceed the max positive mood score (+0.50) so
     # correct-era tracks always dominate regardless of mood match strength.
     return -0.70
+
+
+def _track_matches_language(track: Track, requested_languages: list[str]) -> bool:
+    language = _normalise(track.language)
+    genre = _normalise(track.genre)
+    region = _normalise(track.region)
+    for lang in requested_languages:
+        if lang == "instrumental" and track.isInstrumental:
+            return True
+        if lang == language:
+            return True
+        if lang == "hindi" and (genre in {"bollywood", "desi"} or region == "india"):
+            return True
+        if lang == "marathi" and (genre == "marathi" or region == "maharashtra"):
+            return True
+    return False
 
 
 def _track_matches_era(track: Track, era_preference: str | None) -> bool:
