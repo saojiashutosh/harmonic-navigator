@@ -34,6 +34,7 @@ services:
       DB_PORT: 5432
       IMPORT_TRACKS_ON_STARTUP: ${IMPORT_TRACKS_ON_STARTUP:-auto}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     volumes:
@@ -41,6 +42,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   db:
     image: postgres:14-alpine
