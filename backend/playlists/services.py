@@ -206,6 +206,24 @@ def _build_scored_tracklist(
         else:
             scored_tracks = []
 
+    # ── Hard mood filter: if enough mood-matched tracks exist, exclude others ──
+    # A track is mood-matched when its primaryMood equals the playlist mood OR
+    # it carries an explicit TrackMoodTag for that mood. Secondary-mood tracks
+    # are included when a secondary mood is set, so the blend-diversity step
+    # downstream still has material to work with.
+    accepted_moods = {playlist_mood}
+    if secondary_mood:
+        accepted_moods.add(secondary_mood)
+    accepted_tag_ids: set[str] = set()
+    for m in accepted_moods:
+        accepted_tag_ids |= mood_tag_ids.get(m, set())
+    mood_matched = [
+        (t, s) for t, s in scored_tracks
+        if t.primaryMood in accepted_moods or str(t.id) in accepted_tag_ids
+    ]
+    if len(mood_matched) >= max(limit // 2, 3):
+        scored_tracks = mood_matched
+
     # ── Hard era filter: if enough era-matched tracks exist, exclude others ──
     if era_preference and era_preference != "no_preference":
         era_matched = [
