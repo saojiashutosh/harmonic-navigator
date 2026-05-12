@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "tracks",
     "playlists",
     "feedback",
+    "rest_framework.authtoken",
 ]
 
 
@@ -131,6 +132,23 @@ STATIC_ROOT = env("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles"))
 
 GROQ_API_KEY = env("GROQ_API_KEY", "")
 
+REDIS_URL = env("REDIS_URL", "redis://127.0.0.1:6379/0")
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            # Don't crash the app if Redis is temporarily unavailable;
+            # cache misses gracefully fall through to the DB.
+            "IGNORE_EXCEPTIONS": True,
+            "SOCKET_CONNECT_TIMEOUT": 5,
+            "SOCKET_TIMEOUT": 5,
+        },
+    }
+}
+
 DATA_DIR = BASE_DIR / "data"
 SONG_EXCEL_BACKUP_PATH = env("SONG_EXCEL_BACKUP_PATH", str(DATA_DIR / "song_storage.xlsx"))
 
@@ -142,6 +160,7 @@ REST_FRAMEWORK = {
         "rest_framework.renderers.JSONRenderer",
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.BasicAuthentication",
     ],
