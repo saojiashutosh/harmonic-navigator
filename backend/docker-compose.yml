@@ -17,7 +17,7 @@ services:
           echo "Tracks already exist, skipping Excel import."
         else
           echo "No tracks found, importing from Excel workbook..."
-          python manage.py import_tracks_from_excel --no-color
+          python manage.py import_from_excel /app/data/harmonic_export.xlsx --no-color
         fi
         exec python manage.py runserver 0.0.0.0:8000
     env_file:
