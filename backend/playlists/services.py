@@ -135,16 +135,42 @@ def _build_scored_tracklist(
         music_preference=music_preference,
     )
 
-    # Sleep goal: always serve calm/gentle tracks regardless of inferred mood.
-    # Anxious: remap to calm for grounding music (UI label unchanged).
-    if playlist_goal == "sleep":
-        playlist_mood = "calm"
+    # The questionnaire produces TWO signals:
+    #  - inference.moodLabel   : how the user currently feels
+    #  - playlist_goal         : what they want the music to DO for them
+    #
+    # When goal and current-mood diverge — e.g. the user feels melancholic
+    # but asked to be uplifted — the goal must win, otherwise we serve sad
+    # songs to someone explicitly asking for cheer. The earlier engine only
+    # nudged scoring by +0.18 for "uplift" matches, which the hard mood
+    # filter then overrode by locking the playlist into the inferred mood.
+    #
+    # Mapping: goal -> (primary playlist mood, optional broadening secondary).
+    # "escape" intentionally keeps the inferred mood (escape INTO the
+    # current feeling is a valid request).
+    GOAL_MOOD_OVERRIDES = {
+        "sleep":  ("calm",        None),
+        "relax":  ("calm",        None),
+        "focus":  ("focused",     None),
+        "uplift": ("celebratory", "energized"),
+        "party":  ("celebratory", "energized"),
+    }
+
+    inferred_secondary = getattr(inference, "secondaryMoodLabel", None)
+    mood_blend_ratio = getattr(inference, "moodBlendRatio", 1.0) or 1.0
+
+    if playlist_goal in GOAL_MOOD_OVERRIDES:
+        playlist_mood, secondary_mood = GOAL_MOOD_OVERRIDES[playlist_goal]
+        # When the override fires, the inferred mood blend no longer applies —
+        # we're deliberately not mixing in tracks of the original mood.
+        mood_blend_ratio = 0.85 if secondary_mood else 1.0
     elif inference.moodLabel == "anxious":
+        # Anxious has no track pool of its own; ground the listener in calm.
         playlist_mood = "calm"
+        secondary_mood = inferred_secondary
     else:
         playlist_mood = inference.moodLabel
-    secondary_mood = getattr(inference, "secondaryMoodLabel", None)
-    mood_blend_ratio = getattr(inference, "moodBlendRatio", 1.0) or 1.0
+        secondary_mood = inferred_secondary
 
     candidate_tracks = _build_candidate_pool(
         mood_label=playlist_mood,
