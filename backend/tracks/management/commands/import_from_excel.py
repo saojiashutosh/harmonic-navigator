@@ -128,10 +128,18 @@ class Command(BaseCommand):
                         defaults=defaults,
                     )
                 else:
-                    artist, created = Artist.objects.get_or_create(
-                        name=rec["name"],
-                        defaults=defaults,
+                    artist = (
+                        Artist.objects
+                        .filter(name=rec["name"], spotifyId__isnull=True)
+                        .order_by("id")
+                        .first()
+                        or Artist.objects.filter(name=rec["name"]).order_by("id").first()
                     )
+                    if artist is None:
+                        artist = Artist.objects.create(**defaults)
+                        created = True
+                    else:
+                        created = False
                 if created:
                     artist_created += 1
                 else:
@@ -215,11 +223,22 @@ class Command(BaseCommand):
                     # No spotify_id — match on title + artist
                     title = defaults.get("title")
                     if title:
-                        _, created = Track.objects.update_or_create(
-                            title=title,
-                            artistId=artist,
-                            defaults=defaults,
+                        existing = (
+                            Track.objects.filter(
+                                title=title, artistId=artist, spotifyId__isnull=True
+                            ).order_by("id").first()
+                            or Track.objects.filter(
+                                title=title, artistId=artist
+                            ).order_by("id").first()
                         )
+                        if existing is None:
+                            Track.objects.create(**defaults)
+                            created = True
+                        else:
+                            for k, v in defaults.items():
+                                setattr(existing, k, v)
+                            existing.save()
+                            created = False
                     else:
                         track_skipped += 1
                         continue

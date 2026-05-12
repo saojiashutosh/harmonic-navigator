@@ -14,7 +14,7 @@ from moods.constants import MUSIC_PREFERENCE_OVERRIDES
 from moods.models import MoodInference, MoodSession
 from tracks.models import Track, TrackMoodTag
 
-from .constants import DEFAULT_PLAYLIST_SIZE, MOOD_TYPE_RATIOS, TARGET_TRACK_ATTRIBUTES
+from .constants import ARTIST_ERA, DEFAULT_PLAYLIST_SIZE, MOOD_TYPE_RATIOS, TARGET_TRACK_ATTRIBUTES
 from .models import Playlist, PlaylistTrack
 
 
@@ -286,7 +286,7 @@ def _build_candidate_pool(
 
     base_qs = Track.objects.select_related("artistId").filter(
         isActive=True,
-    ).filter(Q(releaseYear__isnull=True) | Q(releaseYear__gte=1996))
+    )
     if social_setting in {"kids", "meeting"}:
         base_qs = base_qs.filter(isExplicit=False)
 
@@ -611,14 +611,26 @@ def _taste_score(
     return score
 
 
+def _inferred_artist_era(track: Track) -> str | None:
+    artist = getattr(track.artistId, "name", None) if track.artistId_id else None
+    return ARTIST_ERA.get(artist) if artist else None
+
+
 def _era_score(*, track: Track, era_preference: str | None) -> float:
     if not era_preference or era_preference == "no_preference":
         return 0.0
     year = track.releaseYear
     if year is None:
-        # Unknown release year — penalise heavily so confirmed-era tracks always
-        # rank well above untagged ones even when the pool has few era matches.
-        return -0.70
+        inferred = _inferred_artist_era(track)
+        if inferred == era_preference:
+            # NULL year + artist's known era matches the request — treat as
+            # era-correct but with a smaller bonus than confirmed-year tracks
+            # so any track with a real correct year still ranks higher.
+            return 0.30
+        # Unknown era and no inference — mild penalty so confirmed tracks win,
+        # but not so harsh that the playlist becomes empty when many tracks
+        # have missing years.
+        return -0.20
     if era_preference == "latest" and year >= 2024:
         return 0.55
     if era_preference == "recent" and 2020 <= year <= 2023:
@@ -627,7 +639,7 @@ def _era_score(*, track: Track, era_preference: str | None) -> float:
         return 0.48
     if era_preference == "era_2000s" and 2000 <= year <= 2009:
         return 0.48
-    if era_preference == "nineties" and 1996 <= year < 2000:
+    if era_preference == "nineties" and 1990 <= year < 2000:
         return 0.50
     # Wrong era — penalty must exceed the max positive mood score (+0.50) so
     # correct-era tracks always dominate regardless of mood match strength.
@@ -655,7 +667,10 @@ def _track_matches_era(track: Track, era_preference: str | None) -> bool:
     if not era_preference or era_preference == "no_preference":
         return True
     if year is None:
-        return False
+        # Fall back to artist-based era inference so tracks with a missing
+        # releaseYear (typically nulled-out compilation/remaster years) still
+        # surface in the right era when the artist is unambiguously classic.
+        return _inferred_artist_era(track) == era_preference
     if era_preference == "latest":
         return year >= 2024
     if era_preference == "recent":
@@ -665,23 +680,32 @@ def _track_matches_era(track: Track, era_preference: str | None) -> bool:
     if era_preference == "era_2000s":
         return 2000 <= year <= 2009
     if era_preference == "nineties":
-        return 1996 <= year < 2000
+        return 1990 <= year < 2000
     return True
 
 
 def _era_query(era_preference: str | None) -> Q:
     if not era_preference or era_preference == "no_preference":
         return Q()
+    # NULL-year tracks whose artist is known to belong to this era are pulled
+    # into the era-restricted candidate pool so they can be scored alongside
+    # year-confirmed tracks. Without this, NULL-year classics never appear in
+    # era-filtered playlists.
+    inferred_artists = [name for name, era in ARTIST_ERA.items() if era == era_preference]
+    inferred_q = (
+        Q(releaseYear__isnull=True, artistId__name__in=inferred_artists)
+        if inferred_artists else Q(pk__in=[])
+    )
     if era_preference == "latest":
-        return Q(releaseYear__gte=2024)
+        return Q(releaseYear__gte=2024) | inferred_q
     if era_preference == "recent":
-        return Q(releaseYear__gte=2020, releaseYear__lte=2023)
+        return Q(releaseYear__gte=2020, releaseYear__lte=2023) | inferred_q
     if era_preference == "era_2010s":
-        return Q(releaseYear__gte=2010, releaseYear__lte=2019)
+        return Q(releaseYear__gte=2010, releaseYear__lte=2019) | inferred_q
     if era_preference == "era_2000s":
-        return Q(releaseYear__gte=2000, releaseYear__lte=2009)
+        return Q(releaseYear__gte=2000, releaseYear__lte=2009) | inferred_q
     if era_preference == "nineties":
-        return Q(releaseYear__gte=1996, releaseYear__lt=2000)
+        return Q(releaseYear__gte=1990, releaseYear__lt=2000) | inferred_q
     return Q()
 
 
