@@ -13,4 +13,12 @@ staticfiles/
 graphify-out/
 *.csv
 *.md
+
+backend/**/*.json
+!backend/**/manifest.json
+frontend/dist/**/*.json
+node_modules/
 *.json
+!frontend/package.json
+!frontend/package-lock.json
+.xlsx
