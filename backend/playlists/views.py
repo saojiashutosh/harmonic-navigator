@@ -9,6 +9,9 @@ try:
 except ImportError:
     from cryptography.hazmat.primitives.ciphers.algorithms import TripleDES
 from cryptography.hazmat.primitives.ciphers import Cipher, modes
+from django.db import transaction
+from django.db.models import Max
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -16,6 +19,7 @@ from rest_framework.response import Response
 
 from harmonic_navigator.views import HarmonicBaseViewSet
 from moods.models import MoodSession
+from tracks.models import Track
 
 from . import filters, models, serializers
 from .constants import EXPAND_COUNT, GUEST_PLAYLIST_SIZE, REGISTERED_PLAYLIST_SIZE
@@ -60,6 +64,102 @@ class PlaylistViewSet(HarmonicBaseViewSet):
 
         return Response(
             self.get_serializer(playlist).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="save-as",
+        permission_classes=[IsAuthenticated],
+    )
+    def save_as(self, request, pk=None):
+        """Save a generated playlist under a user-chosen name.
+
+        Claims an unowned (guest) playlist for the current user, marks it
+        saved, and creates a SavedPlaylist bookmark with the custom name.
+        """
+        playlist = self.get_object()
+        serializer = serializers.SavePlaylistAsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        name = serializer.validated_data["name"].strip()
+
+        with transaction.atomic():
+            update_fields = []
+            if playlist.userId_id is None:
+                playlist.userId = request.user
+                update_fields.append("userId")
+            if not playlist.isSaved:
+                playlist.isSaved = True
+                playlist.savedAt = timezone.now()
+                update_fields += ["isSaved", "savedAt"]
+            if update_fields:
+                playlist.save(update_fields=update_fields)
+
+            saved, created = models.SavedPlaylist.objects.update_or_create(
+                userId=request.user,
+                playlistId=playlist,
+                defaults={"name": name},
+            )
+
+        return Response(
+            serializers.SavedPlaylistSerializer(saved).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="add-track",
+        permission_classes=[IsAuthenticated],
+    )
+    def add_track(self, request, pk=None):
+        """Append a single track to a user-owned saved playlist."""
+        playlist = self.get_object()
+
+        if not models.SavedPlaylist.objects.filter(
+            userId=request.user, playlistId=playlist
+        ).exists():
+            return Response(
+                {"detail": "You can only add tracks to playlists you've saved."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = serializers.AddTrackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        track_id = serializer.validated_data["trackId"]
+
+        try:
+            track = Track.objects.get(id=track_id)
+        except Track.DoesNotExist:
+            return Response({"detail": "Track not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if models.PlaylistTrack.objects.filter(
+            playlistId=playlist, trackId=track
+        ).exists():
+            return Response(
+                {"detail": "Track already in this playlist."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        with transaction.atomic():
+            max_pos = (
+                models.PlaylistTrack.objects.filter(playlistId=playlist)
+                .aggregate(m=Max("position"))["m"]
+                or 0
+            )
+            pt = models.PlaylistTrack.objects.create(
+                playlistId=playlist,
+                trackId=track,
+                position=max_pos + 1,
+                selectionReason=models.PlaylistTrack.SelectionReason.TAG_MATCH,
+            )
+            models.Playlist.objects.filter(pk=playlist.pk).update(
+                trackCount=max_pos + 1
+            )
+
+        return Response(
+            serializers.PlaylistTrackSerializer(pt).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -114,6 +214,30 @@ class SavedPlaylistViewSet(HarmonicBaseViewSet):
     ordering_fields = (
         'updatedAt',
     )
+
+    def get_queryset(self):
+        return (
+            super().get_queryset()
+            .select_related("playlistId")
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="mine",
+        permission_classes=[IsAuthenticated],
+    )
+    def mine(self, request):
+        """List the current user's saved playlists, newest first."""
+        qs = (
+            self.get_queryset()
+            .filter(userId=request.user)
+            .order_by("-updatedAt")
+        )
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            return self.get_paginated_response(self.get_serializer(page, many=True).data)
+        return Response(self.get_serializer(qs, many=True).data)
 
 
 

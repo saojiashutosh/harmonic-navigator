@@ -45,6 +45,7 @@ class PlaylistTrackSerializer(HarmonicBaseSerializer):
 
 
 class SavedPlaylistSerializer(HarmonicBaseSerializer):
+    playlist = PlaylistSerializer(source="playlistId", read_only=True)
 
     class Meta:
         model = SavedPlaylist
@@ -55,9 +56,18 @@ class SavedPlaylistSerializer(HarmonicBaseSerializer):
             'userId',
             'playlistId',
             'name',
+            'playlist',
         )
 
 
 class GeneratePlaylistSerializer(serializers.Serializer):
     moodSessionId = serializers.UUIDField()
     limit = serializers.IntegerField(required=False, min_value=1, max_value=50, default=20)
+
+
+class SavePlaylistAsSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=120, allow_blank=False)
+
+
+class AddTrackSerializer(serializers.Serializer):
+    trackId = serializers.UUIDField()

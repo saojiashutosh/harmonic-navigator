@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "tracks",
     "playlists",
     "feedback",
+    "groups",
     "rest_framework.authtoken",
 ]
 

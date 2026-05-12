@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import './index.css';
 import { PlayerProvider, usePlayer } from './components/PlayerContext';
 import MusicPlayer from './components/MusicPlayer';
@@ -6,6 +7,43 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import AuthModal from './components/AuthModal';
 import * as API from './api';
 import HS from './utils/HarmonicShared';
+
+/**
+ * Ask the browser for the laptop's LAN-routable address via a WebRTC ICE
+ * candidate. No actual peer connection is opened. Prefers a real IPv4
+ * (e.g. 192.168.1.42) so a phone on the same Wi-Fi can hit it directly.
+ * Falls back to the mDNS hostname (xxxx.local) modern browsers return for
+ * privacy — that name also resolves on most phones on the same network.
+ */
+async function detectLanHost() {
+  if (typeof RTCPeerConnection === 'undefined') return null;
+  return new Promise((resolve) => {
+    let pc;
+    try { pc = new RTCPeerConnection({ iceServers: [] }); }
+    catch { return resolve(null); }
+    const ipv4s = [];
+    const mdns = [];
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      try { pc.close(); } catch {}
+      resolve(ipv4s[0] || mdns[0] || null);
+    };
+    pc.onicecandidate = (e) => {
+      if (!e.candidate) return finish();
+      // Candidate line: "candidate:... <addr> <port> typ host ..."
+      const parts = e.candidate.candidate.split(' ');
+      const addr = parts[4];
+      if (!addr) return;
+      if (/^\d+\.\d+\.\d+\.\d+$/.test(addr) && !addr.startsWith('127.')) ipv4s.push(addr);
+      else if (addr.endsWith('.local')) mdns.push(addr);
+    };
+    try { pc.createDataChannel(''); } catch {}
+    pc.createOffer().then(o => pc.setLocalDescription(o)).catch(finish);
+    setTimeout(finish, 1500);
+  });
+}
 
 /* ── Logo ─────────────────────────────────────────────────────── */
 function HarmonicMark({ size = 32 }) {
@@ -248,7 +286,7 @@ function PaperBackdrop() {
 }
 
 /* ── Header ──────────────────────────────────────────────── */
-function Header({ onHome, view }) {
+function Header({ onHome, onMyPlaylists, view }) {
   const { user, logout, openAuth } = useAuth();
 
   return (
@@ -257,14 +295,15 @@ function Header({ onHome, view }) {
         <HarmonicMark size={34} />
         <span>Harmonic</span>
       </button>
-      <nav className="og-nav">
-        <span className={view === 'home' ? 'active' : ''}>Listen</span>
-        <span>Field notes</span>
-        <span>About</span>
-      </nav>
       <div className="og-header-auth">
         {user ? (
           <>
+            <button
+              className={`og-btn og-btn-ghost og-btn-sm ${view === 'mylists' ? 'is-active' : ''}`}
+              onClick={onMyPlaylists}
+            >
+              my playlists
+            </button>
             <span className="og-auth-name">{user.firstName}</span>
             <button className="og-btn og-btn-ghost og-btn-sm" onClick={logout}>sign out</button>
           </>
@@ -273,6 +312,85 @@ function Header({ onHome, view }) {
         )}
       </div>
     </header>
+  );
+}
+
+/* ── Save-as modal ─────────────────────────────────────── */
+function SavePlaylistModal({ open, defaultName, onClose, onSave }) {
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    if (open) { setName(defaultName || ''); setErr(null); }
+  }, [open, defaultName]);
+
+  if (!open) return null;
+
+  const submit = async (e) => {
+    e?.preventDefault?.();
+    const trimmed = name.trim();
+    if (!trimmed) { setErr('please give it a name'); return; }
+    setSaving(true); setErr(null);
+    try {
+      await onSave(trimmed);
+      onClose();
+    } catch (e) { setErr(e.message || 'could not save'); setSaving(false); }
+  };
+
+  return (
+    <div className="og-modal-backdrop" onClick={onClose}>
+      <form className="og-modal" onClick={e => e.stopPropagation()} onSubmit={submit}>
+        <h3>name your playlist</h3>
+        <p className="og-modal-sub">a small label, for when you come back to it.</p>
+        <input
+          autoFocus
+          className="og-modal-input"
+          placeholder="rainy tuesday, focus hour…"
+          value={name}
+          maxLength={120}
+          onChange={e => setName(e.target.value)}
+        />
+        {err && <span className="og-modal-err">{err}</span>}
+        <div className="og-modal-actions">
+          <button type="button" className="og-btn og-btn-ghost" onClick={onClose} disabled={saving}>cancel</button>
+          <button type="submit" className="og-btn og-btn-primary" disabled={saving}>
+            {saving ? 'saving…' : 'save playlist'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* ── Add-to-playlist popover ───────────────────────────── */
+function AddToPlaylistPopover({ open, onClose, onPick, loading, playlists, error }) {
+  if (!open) return null;
+  return (
+    <div className="og-pop-backdrop" onClick={onClose}>
+      <div className="og-pop" onClick={e => e.stopPropagation()}>
+        <header>add to playlist</header>
+        {loading ? (
+          <p className="og-pop-empty">loading…</p>
+        ) : error ? (
+          <p className="og-pop-empty">{error}</p>
+        ) : playlists.length === 0 ? (
+          <p className="og-pop-empty">no saved playlists yet. create one first.</p>
+        ) : (
+          <ul className="og-pop-list">
+            {playlists.map(sp => (
+              <li key={sp.id}>
+                <button onClick={() => onPick(sp)}>
+                  <span className="og-pop-name">{sp.name || 'untitled'}</span>
+                  <span className="og-pop-meta">{sp.playlist?.moodLabel || '—'} · {sp.playlist?.trackCount || 0}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <footer><button className="og-btn og-btn-ghost og-btn-sm" onClick={onClose}>close</button></footer>
+      </div>
+    </div>
   );
 }
 
@@ -340,7 +458,7 @@ function HeroPreviewCard() {
 }
 
 /* ── Landing ─────────────────────────────────────────────── */
-function Landing({ onStart }) {
+function Landing({ onStart, onStartGroup, onJoinGroup }) {
   return (
     <div className="og-landing">
       <div className="og-hero">
@@ -358,6 +476,10 @@ function Landing({ onStart }) {
               <svg width="20" height="20" viewBox="0 0 20 20"><path d="M4 10 L16 10 M11 5 L16 10 L11 15" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
             <span className="og-hero-aside">~ 3 min · no account · 15 tracks</span>
+          </div>
+          <div className="og-hero-group">
+            <button className="og-btn og-btn-ghost" onClick={onStartGroup}>listen together ◌</button>
+            <button className="og-btn og-btn-ghost og-btn-sm" onClick={onJoinGroup}>have a code?</button>
           </div>
         </div>
         <HeroPreviewCard />
@@ -402,7 +524,7 @@ const MARGINALIA = [
   'the colour of this hour',
 ];
 
-function MoodCard({ onComplete, onGuestLimit }) {
+function MoodCard({ onComplete, onGuestLimit, groupContext }) {
   const { closePlayer } = usePlayer();
   const { openAuth } = useAuth();
   const [questions, setQuestions] = useState([]);
@@ -462,6 +584,17 @@ function MoodCard({ onComplete, onGuestLimit }) {
     closePlayer();
     try {
       const inf = await API.submitAnswers(sessionId, answers);
+      if (groupContext?.groupId) {
+        // Group flow: link this survey to the lobby; the host generates
+        // the blended playlist when everyone's ready.
+        await API.attachMoodSessionToGroup(
+          groupContext.groupId,
+          groupContext.participantId,
+          inf.moodSessionId,
+        );
+        onComplete({ groupReturn: true });
+        return;
+      }
       const pl = await API.generatePlaylist(inf.moodSessionId, 15);
       const tracks = await API.fetchPlaylistTracks(pl.id);
       onComplete({
@@ -654,6 +787,7 @@ function MoodSigil({ mood, drawIn = true, size }) {
 /* ── Results ────────────────────────────────────────────── */
 function Results({ results, onRestart }) {
   const { loadPlaylist, jumpTo, isPlaying, currentTrack, queue } = usePlayer();
+  const { user, openAuth } = useAuth();
   const meta = HS.moodMeta(results?.moodLabel);
   const initialTracks = results?.tracks || [];
   // Use the live queue so expanded tracks appear immediately in the list.
@@ -662,20 +796,61 @@ function Results({ results, onRestart }) {
     ? queue
     : initialTracks;
   const conf = Math.round((results?.confidence || 0) * 100);
-  // Average track relevanceScore across the playlist, normalised so a
-  // typical good match (~1.8 raw) reads as ~90%. Engine raw range is 0-4
-  // but realistic per-track maxes out near 2.0 once mood + language +
-  // style + era + lyrics signals stack.
   const avgRelevance = tracks.length
     ? tracks.reduce((s, t) => s + (t.relevanceScore || 0), 0) / tracks.length
     : 0;
   const fit = Math.min(100, Math.max(0, Math.round((avgRelevance / 2.0) * 100)));
+
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [addOpenTrackId, setAddOpenTrackId] = useState(null);
+  const [myLists, setMyLists] = useState([]);
+  const [listsLoading, setListsLoading] = useState(false);
+  const [listsError, setListsError] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2400); };
+
+  const loadMyLists = async () => {
+    setListsLoading(true); setListsError(null);
+    try { setMyLists(await API.fetchMyPlaylists()); }
+    catch (e) { setListsError(e.message); }
+    finally { setListsLoading(false); }
+  };
 
   const handlePlay = (i) => {
     if (queue.length > 0 && tracks.length > 0 && queue[0].id === tracks[0].id) {
       jumpTo(i);
     } else {
       loadPlaylist(tracks, i, results?.moodLabel, '#C26F3C');
+    }
+  };
+
+  const openCreate = () => {
+    if (!user) { openAuth('signin', 'sign in to save this playlist.'); return; }
+    setSaveOpen(true);
+  };
+
+  const handleSave = async (name) => {
+    await API.savePlaylistAs(results.playlistId, name);
+    setSaved(true);
+    showToast(`saved as “${name}”`);
+  };
+
+  const openAddTo = (trackId) => {
+    if (!user) { openAuth('signin', 'sign in to add this song to a playlist.'); return; }
+    setAddOpenTrackId(trackId);
+    loadMyLists();
+  };
+
+  const handlePick = async (sp) => {
+    try {
+      await API.addTrackToPlaylist(sp.playlist?.id || sp.playlistId, addOpenTrackId);
+      showToast(`added to “${sp.name || 'playlist'}”`);
+    } catch (e) {
+      showToast(e.status === 409 ? 'already in that playlist' : 'could not add');
+    } finally {
+      setAddOpenTrackId(null);
     }
   };
 
@@ -693,24 +868,147 @@ function Results({ results, onRestart }) {
         </div>
         <div className="og-r-cta">
           <button className="og-btn og-btn-primary" onClick={() => handlePlay(0)}>play the bouquet ▸</button>
+          <button className="og-btn og-btn-ghost" onClick={openCreate} disabled={saved}>
+            {saved ? 'saved ✓' : '+ create playlist'}
+          </button>
           <button className="og-btn og-btn-ghost" onClick={onRestart}>start a new one</button>
         </div>
       </div>
       <div className="og-r-right">
-        <div className="og-tl-head"><span>nº</span><span>track</span><span>artist</span><span>lang</span><span>time</span></div>
+        <div className="og-tl-head"><span>nº</span><span>track</span><span>artist</span><span>lang</span><span>time</span><span></span></div>
         {tracks.map((t, i) => {
           const active = currentTrack && currentTrack.id === t.id;
           return (
-            <button key={t.id || i} className={`og-track ${active ? 'is-active' : ''}`} onClick={() => handlePlay(i)}>
-              <span className="og-tr-n">{String(i + 1).padStart(2, '0')}</span>
-              <span className="og-tr-t">{t.title}{active && <em> · {isPlaying ? 'playing' : 'paused'}</em>}</span>
-              <span className="og-tr-a">{t.artistId?.name || t.artistName}</span>
-              <span className="og-tr-l">{t.language}</span>
-              <span className="og-tr-d">{t.durationMinutes}</span>
-            </button>
+            <div key={t.id || i} className={`og-track ${active ? 'is-active' : ''}`}>
+              <button className="og-track-main" onClick={() => handlePlay(i)}>
+                <span className="og-tr-n">{String(i + 1).padStart(2, '0')}</span>
+                <span className="og-tr-t">{t.title}{active && <em> · {isPlaying ? 'playing' : 'paused'}</em>}</span>
+                <span className="og-tr-a">{t.artistId?.name || t.artistName}</span>
+                <span className="og-tr-l">{t.language}</span>
+                <span className="og-tr-d">{t.durationMinutes}</span>
+              </button>
+              <button
+                className="og-tr-add"
+                title="add to a saved playlist"
+                onClick={(e) => { e.stopPropagation(); openAddTo(t.id); }}
+              >+</button>
+            </div>
           );
         })}
       </div>
+
+      <SavePlaylistModal
+        open={saveOpen}
+        defaultName={`${(results?.moodLabel || 'my').toLowerCase()} · ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toLowerCase()}`}
+        onClose={() => setSaveOpen(false)}
+        onSave={handleSave}
+      />
+      <AddToPlaylistPopover
+        open={addOpenTrackId !== null}
+        loading={listsLoading}
+        playlists={myLists}
+        error={listsError}
+        onClose={() => setAddOpenTrackId(null)}
+        onPick={handlePick}
+      />
+      {toast && <div className="og-toast">{toast}</div>}
+    </div>
+  );
+}
+
+/* ── My Playlists view ─────────────────────────────────── */
+function MyPlaylists({ onBack }) {
+  const { loadPlaylist } = usePlayer();
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const [openTracks, setOpenTracks] = useState([]);
+  const [tracksLoading, setTracksLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await API.fetchMyPlaylists();
+        if (!cancelled) { setItems(data); setLoading(false); }
+      } catch (e) {
+        if (!cancelled) { setError(e.message); setLoading(false); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const openOne = async (sp) => {
+    const pid = sp.playlist?.id || sp.playlistId;
+    setOpenId(sp.id);
+    setTracksLoading(true);
+    try {
+      const rows = await API.fetchPlaylistTracks(pid);
+      setOpenTracks(rows.map(t => t.track));
+    } catch (e) { setError(e.message); }
+    finally { setTracksLoading(false); }
+  };
+
+  const playSaved = async (sp, idx = 0) => {
+    const pid = sp.playlist?.id || sp.playlistId;
+    try {
+      const rows = await API.fetchPlaylistTracks(pid);
+      loadPlaylist(rows.map(t => t.track), idx, sp.playlist?.moodLabel || '', '#C26F3C');
+    } catch (e) { setError(e.message); }
+  };
+
+  if (loading) return <OrbitalLoader label="opening your shelf…" />;
+  if (error) return <div className="og-loading"><p>{error}</p></div>;
+
+  return (
+    <div className="og-mylists">
+      <div className="og-ml-head">
+        <span className="og-eyebrow">your shelf</span>
+        <h1>my playlists.</h1>
+        <p>the rooms you've saved. step back into any of them.</p>
+        <button className="og-btn og-btn-ghost og-btn-sm" onClick={onBack}>← home</button>
+      </div>
+      {items.length === 0 ? (
+        <div className="og-ml-empty">
+          <p>nothing here yet — take a session and press <em>create playlist</em>.</p>
+        </div>
+      ) : (
+        <div className="og-ml-grid">
+          {items.map(sp => {
+            const expanded = openId === sp.id;
+            return (
+              <div key={sp.id} className={`og-ml-card ${expanded ? 'is-open' : ''}`}>
+                <div className="og-ml-card-head">
+                  <div>
+                    <h3>{sp.name || 'untitled'}</h3>
+                    <span className="og-ml-meta">
+                      {(sp.playlist?.moodLabel || '—')} · {sp.playlist?.trackCount || 0} tracks
+                    </span>
+                  </div>
+                  <div className="og-ml-actions">
+                    <button className="og-btn og-btn-primary og-btn-sm" onClick={() => playSaved(sp)}>play ▸</button>
+                    <button className="og-btn og-btn-ghost og-btn-sm" onClick={() => expanded ? setOpenId(null) : openOne(sp)}>
+                      {expanded ? 'hide' : 'view'}
+                    </button>
+                  </div>
+                </div>
+                {expanded && (
+                  <div className="og-ml-tracks">
+                    {tracksLoading ? <p>loading…</p> : openTracks.map((t, i) => (
+                      <button key={t.id} className="og-ml-track" onClick={() => playSaved(sp, i)}>
+                        <span>{String(i + 1).padStart(2, '0')}</span>
+                        <span>{t.title}</span>
+                        <span>{t.artistId?.name || t.artistName}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -766,8 +1064,10 @@ function PlayerStrip({ onNewSession, playlistId }) {
   const handleSeek = (e) => {
     if (!seekTo) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    seekTo(Math.max(0, Math.min(1, x / waveW)));
+    const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? e.changedTouches?.[0]?.clientX;
+    if (clientX == null) return;
+    const x = clientX - rect.left;
+    seekTo(Math.max(0, Math.min(1, x / rect.width)));
   };
 
   const boatX = (progress || 0) * waveW;
@@ -810,7 +1110,7 @@ function PlayerStrip({ onNewSession, playlistId }) {
           <span className="og-pa">{isLoadingAudio ? 'finding on JioSaavn…' : (track.artistId?.name || track.artistName)}</span>
         </div>
 
-        <svg width={waveW} height={waveH} className="og-player-wave" onClick={handleSeek} style={{ cursor: 'pointer', overflow: 'visible' }}>
+        <svg viewBox={`0 0 ${waveW} ${waveH}`} preserveAspectRatio="none" height={waveH} className="og-player-wave" onClick={handleSeek} onTouchEnd={handleSeek} style={{ cursor: 'pointer', overflow: 'visible', touchAction: 'manipulation', width: '100%', maxWidth: waveW + 'px' }}>
           <rect width={waveW} height={waveH} fill="transparent" />
           <path d={path} stroke="var(--sage)" strokeWidth="1.2" fill="none" strokeLinecap="round" opacity="0.6" />
           <path d={path} stroke="var(--accent)" strokeWidth="1.6" fill="none" strokeLinecap="round" clipPath="url(#progress-clip)" />
@@ -835,13 +1135,270 @@ function PlayerStrip({ onNewSession, playlistId }) {
   );
 }
 
+/* ── Group: create / join modals ───────────────────────── */
+function GroupNameModal({ open, title, cta, requireCode, initialCode = '', onClose, onSubmit }) {
+  const [name, setName] = useState('');
+  const [code, setCode] = useState(initialCode);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => { if (open) { setName(''); setCode(initialCode || ''); setErr(null); } }, [open, initialCode]);
+  if (!open) return null;
+
+  const go = async (e) => {
+    e?.preventDefault?.();
+    if (!name.trim()) { setErr('your name, please'); return; }
+    if (requireCode && !code.trim()) { setErr('enter the group code'); return; }
+    setBusy(true); setErr(null);
+    try { await onSubmit({ name: name.trim(), code: code.trim().toUpperCase() }); }
+    catch (e) { setErr(e.message || 'could not continue'); setBusy(false); }
+  };
+
+  return (
+    <div className="og-modal-backdrop" onClick={onClose}>
+      <form className="og-modal" onClick={e => e.stopPropagation()} onSubmit={go}>
+        <h3>{title}</h3>
+        {requireCode && (
+          <input
+            autoFocus
+            className="og-modal-input og-modal-code"
+            placeholder="ABC123"
+            value={code}
+            maxLength={8}
+            onChange={e => setCode(e.target.value.toUpperCase())}
+          />
+        )}
+        <input
+          autoFocus={!requireCode}
+          className="og-modal-input"
+          placeholder="your name (or a nickname)"
+          value={name}
+          maxLength={64}
+          onChange={e => setName(e.target.value)}
+        />
+        {err && <span className="og-modal-err">{err}</span>}
+        <div className="og-modal-actions">
+          <button type="button" className="og-btn og-btn-ghost" onClick={onClose} disabled={busy}>cancel</button>
+          <button type="submit" className="og-btn og-btn-primary" disabled={busy}>{busy ? '…' : cta}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* ── Group lobby ───────────────────────────────────────── */
+function GroupLobby({ group: initialGroup, role, participantId, onTakeSurvey, onPlaylistReady, onLeave }) {
+  const [group, setGroup] = useState(initialGroup);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Poll the lobby state every 2.5s while waiting.
+  useEffect(() => {
+    if (group.status === 'generated') return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const fresh = await API.fetchGroupSession(group.id);
+        if (cancelled) return;
+        if (fresh.status === 'generated' && fresh.playlistId) {
+          // Navigate BEFORE setGroup — otherwise the status-change re-render
+          // triggers this effect's cleanup (cancelled=true) mid-await, which
+          // would swallow onPlaylistReady and strand the user on the lobby.
+          const tracks = await API.fetchPlaylistTracks(fresh.playlistId);
+          if (cancelled) return;
+          onPlaylistReady({
+            moodLabel: fresh.blendedMoodLabel || fresh.playlist?.moodLabel,
+            confidence: fresh.playlist?.confidence || 0,
+            tracks: tracks.map(t => ({ ...t.track, relevanceScore: t.relevanceScore })),
+            playlistId: fresh.playlistId,
+          });
+          return;
+        }
+        setGroup(fresh);
+      } catch (e) { /* poll quietly */ }
+    };
+    const id = setInterval(tick, 2500);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [group.id, group.status]);
+
+  const me = group.participants?.find(p => p.id === participantId);
+  const readyCount = (group.participants || []).filter(p => p.isReady).length;
+  const total = group.participants?.length || 0;
+  const canGenerate = role === 'host' && readyCount >= 2;
+  // The phone can't reach the laptop's "localhost" — when the host opens the
+  // app on localhost we discover the laptop's LAN address via a WebRTC ICE
+  // candidate (the browser already knows it; we don't actually open a peer
+  // connection). That hostname goes into the QR so scanning Just Works.
+  const isLoopback = ['localhost', '127.0.0.1', '0.0.0.0'].includes(window.location.hostname);
+  const [shareHost, setShareHost] = useState(() => localStorage.getItem('hn_share_host') || '');
+  const [hostInput, setHostInput] = useState(shareHost);
+  const [detecting, setDetecting] = useState(isLoopback && !shareHost);
+
+  useEffect(() => {
+    if (!isLoopback || shareHost) return;
+    let cancelled = false;
+    (async () => {
+      // Source 1: Vite injected the laptop's LAN IP at startup. This is the
+      // reliable path because it reads os.networkInterfaces() directly on
+      // the host, bypassing the browser's mDNS obfuscation entirely.
+      let detected = null;
+      try { detected = __LAN_IP__ || null; } catch { /* define did not run */ }
+      // Source 2: fall back to WebRTC ICE if Vite didn't inject one
+      // (e.g. running a static build, or laptop has no Wi-Fi/Ethernet up).
+      if (!detected) detected = await detectLanHost();
+      if (cancelled) return;
+      if (detected) {
+        setShareHost(detected);
+        localStorage.setItem('hn_share_host', detected);
+        setHostInput(detected);
+      }
+      setDetecting(false);
+    })();
+    return () => { cancelled = true; };
+  }, [isLoopback, shareHost]);
+
+  const shareOrigin = (isLoopback && shareHost)
+    ? `${window.location.protocol}//${shareHost}${window.location.port ? ':' + window.location.port : ''}`
+    : window.location.origin;
+  const joinUrl = `${shareOrigin}/?join=${group.code}`;
+
+  const saveShareHost = (raw) => {
+    const cleaned = (raw || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+    setShareHost(cleaned);
+    if (cleaned) localStorage.setItem('hn_share_host', cleaned);
+    else localStorage.removeItem('hn_share_host');
+  };
+
+  const copyCode = () => {
+    try { navigator.clipboard.writeText(group.code); } catch (_) {}
+  };
+
+  const handleGenerate = async () => {
+    setGenerating(true); setError(null);
+    try {
+      const fresh = await API.generateGroupPlaylist(group.id);
+      if (fresh?.status === 'generated' && fresh.playlistId) {
+        const tracks = await API.fetchPlaylistTracks(fresh.playlistId);
+        onPlaylistReady({
+          moodLabel: fresh.blendedMoodLabel || fresh.playlist?.moodLabel,
+          confidence: fresh.playlist?.confidence || 0,
+          tracks: tracks.map(t => ({ ...t.track, relevanceScore: t.relevanceScore })),
+          playlistId: fresh.playlistId,
+        });
+        return;
+      }
+      setGroup(fresh);
+      setGenerating(false);
+    }
+    catch (e) { setError(e.message); setGenerating(false); }
+  };
+
+  return (
+    <div className="og-grouplobby">
+      <div className="og-gl-head">
+        <span className="og-eyebrow">a session for the room</span>
+        <h1>listen <em>together</em>.</h1>
+        <p>each person answers their own survey on their own device, and we blend the readings into one playlist.</p>
+      </div>
+
+      <div className="og-gl-body">
+        <div className="og-gl-card og-gl-code-card">
+          <span className="og-gl-label">join code</span>
+          <div className="og-gl-code">{group.code}</div>
+          <button className="og-btn og-btn-ghost og-btn-sm" onClick={copyCode}>copy code</button>
+          <div className="og-gl-qr" title={`Scan to join ${group.code}`}>
+            <QRCodeSVG
+              value={joinUrl}
+              size={180}
+              level="M"
+              bgColor="transparent"
+              fgColor="var(--ink)"
+            />
+          </div>
+          {isLoopback && detecting && (
+            <span className="og-gl-aside">finding your LAN address…</span>
+          )}
+          {isLoopback && !detecting && !shareHost && (
+            <div className="og-gl-lan-warn">
+              <strong>couldn&rsquo;t auto-detect your LAN address.</strong>
+              <span>type your laptop&rsquo;s LAN IP so the QR points there:</span>
+              <div className="og-gl-lan-row">
+                <input
+                  className="og-modal-input"
+                  placeholder="192.168.1.42"
+                  value={hostInput}
+                  onChange={e => setHostInput(e.target.value)}
+                />
+                <button className="og-btn og-btn-primary og-btn-sm" onClick={() => saveShareHost(hostInput)}>use</button>
+              </div>
+              <span className="og-gl-aside">find it with <code>ipconfig</code> (Windows) or <code>ifconfig</code> (mac/linux).</span>
+            </div>
+          )}
+          {shareHost && (
+            <span className="og-gl-aside">
+              QR → <code>{shareHost}</code> ·{' '}
+              <button className="og-link" onClick={() => saveShareHost('')}>change</button>
+            </span>
+          )}
+          {!isLoopback && (
+            <span className="og-gl-aside">scan, or go to /?join={group.code}</span>
+          )}
+        </div>
+
+        <div className="og-gl-card og-gl-people">
+          <span className="og-gl-label">in the room · {readyCount}/{total} ready</span>
+          <ul className="og-gl-list">
+            {(group.participants || []).map(p => (
+              <li key={p.id} className={`${p.isReady ? 'is-ready' : ''} ${p.id === participantId ? 'is-me' : ''}`}>
+                <span className="og-gl-dot" aria-hidden="true" />
+                <span className="og-gl-name">{p.displayName}{p.isHost && ' · host'}{p.id === participantId && ' · you'}</span>
+                <span className="og-gl-mood">{p.isReady ? (p.moodLabel || 'ready') : 'taking survey…'}</span>
+              </li>
+            ))}
+          </ul>
+
+          <div className="og-gl-actions">
+            {me && !me.isReady && (
+              <button className="og-btn og-btn-primary" onClick={onTakeSurvey}>take your survey ▸</button>
+            )}
+            {me && me.isReady && group.status !== 'generated' && (
+              <span className="og-gl-aside">you&rsquo;re ready — waiting for the rest of the room.</span>
+            )}
+            {role === 'host' && (
+              <button
+                className="og-btn og-btn-primary"
+                disabled={!canGenerate || generating}
+                onClick={handleGenerate}
+                title={canGenerate ? '' : 'need at least two people ready'}
+              >
+                {generating ? 'blending…' : (canGenerate ? 'blend & play ▸' : `${Math.max(0, 2 - readyCount)} more needed`)}
+              </button>
+            )}
+            <button className="og-btn og-btn-ghost og-btn-sm" onClick={onLeave}>leave</button>
+          </div>
+          {error && <span className="og-modal-err">{error}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Root ──────────────────────────────────────────────── */
 function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'editorial' }) {
   const [view, setView] = useState('home');
   const [results, setResults] = useState(null);
+  const [groupCtx, setGroupCtx] = useState(null);   // { id, code, role, participantId }
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showJoinGroup, setShowJoinGroup] = useState(false);
+  const [joinCodeSeed, setJoinCodeSeed] = useState('');
   const { closePlayer } = usePlayer();
 
   const onComplete = (data) => {
+    if (data?.groupReturn) {
+      // Group survey just submitted — return to the lobby.
+      setView('group-lobby');
+      return;
+    }
     setResults(data);
     setView('results');
   };
@@ -849,27 +1406,103 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
   const handleNewSession = () => {
     closePlayer();
     setResults(null);
+    setGroupCtx(null);
     setView('home');
   };
+
+  const handleCreateGroup = async ({ name }) => {
+    const { groupSession, participantId } = await API.createGroupSession(name);
+    setGroupCtx({
+      id: groupSession.id,
+      code: groupSession.code,
+      role: 'host',
+      participantId,
+      initial: groupSession,
+    });
+    setShowCreateGroup(false);
+    setView('group-lobby');
+  };
+
+  const handleJoinGroup = async ({ name, code }) => {
+    const { groupSession, participantId } = await API.joinGroupSession(code, name);
+    setGroupCtx({
+      id: groupSession.id,
+      code: groupSession.code,
+      role: 'guest',
+      participantId,
+      initial: groupSession,
+    });
+    setShowJoinGroup(false);
+    setView('group-lobby');
+  };
+
+  // Auto-open the join modal if the URL has ?join=CODE
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('join');
+    if (code) {
+      setJoinCodeSeed(code.toUpperCase());
+      setShowJoinGroup(true);
+    }
+  }, []);
 
   return (
     <div className={`og-shell density-${density} palette-${palette} type-${typeStyle}`}>
       <AmbientLayer />
       <PaperBackdrop />
-      <Header view={view} onHome={() => { setView('home'); setResults(null); }} />
+      <Header
+        view={view}
+        onHome={() => { setView('home'); setResults(null); }}
+        onMyPlaylists={() => setView('mylists')}
+      />
       <main className={`og-main view-${view}`}>
-        {view === 'home' && <Landing onStart={() => setView('mood')} />}
+        {view === 'home' && (
+          <Landing
+            onStart={() => setView('mood')}
+            onStartGroup={() => setShowCreateGroup(true)}
+            onJoinGroup={() => setShowJoinGroup(true)}
+          />
+        )}
         {view === 'mood' && (
           <MoodCard
             onComplete={onComplete}
             onGuestLimit={() => setView('home')}
+            groupContext={groupCtx ? { groupId: groupCtx.id, participantId: groupCtx.participantId } : null}
           />
         )}
-        {view === 'results' && <Results results={results} onRestart={() => { setView('home'); setResults(null); }} />}
+        {view === 'results' && <Results results={results} onRestart={() => { setView('home'); setResults(null); setGroupCtx(null); }} />}
+        {view === 'mylists' && <MyPlaylists onBack={() => setView('home')} />}
+        {view === 'group-lobby' && groupCtx && (
+          <GroupLobby
+            group={groupCtx.initial}
+            role={groupCtx.role}
+            participantId={groupCtx.participantId}
+            onTakeSurvey={() => setView('mood')}
+            onPlaylistReady={(data) => { setResults(data); setView('results'); }}
+            onLeave={() => { setGroupCtx(null); setView('home'); }}
+          />
+        )}
       </main>
       <PlayerStrip onNewSession={handleNewSession} playlistId={results?.playlistId} />
       <MusicPlayer />
       <AuthModal />
+      <GroupNameModal
+        open={showCreateGroup}
+        title="start a group session"
+        cta="create room"
+        requireCode={false}
+        onClose={() => setShowCreateGroup(false)}
+        onSubmit={handleCreateGroup}
+      />
+      <GroupNameModal
+        open={showJoinGroup}
+        title="join a session"
+        cta="join room"
+        requireCode={true}
+        initialCode={joinCodeSeed}
+        onClose={() => { setShowJoinGroup(false); setJoinCodeSeed(''); }}
+        onSubmit={handleJoinGroup}
+      />
     </div>
   );
 }

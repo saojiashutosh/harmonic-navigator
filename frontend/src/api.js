@@ -1,4 +1,7 @@
-const BASE_URL = 'http://localhost:8000';
+// API calls go same-origin (e.g. /moods/..., /groups/...). Vite's dev server
+// proxies those paths to Django on :8000 — see vite.config.js. This means the
+// phone only ever needs to reach the Vite port; the backend stays internal.
+const BASE_URL = '';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
@@ -132,6 +135,96 @@ export const fetchPlaylistTracks = async (playlistId, { offset = 0, limit = 200 
   if (!res.ok) throw new Error(`Failed to fetch playlist tracks: ${res.status}`);
   const data = await res.json();
   return Array.isArray(data) ? data : data.results ?? [];
+};
+
+// ── Saved Playlists ───────────────────────────────────────────────────────────
+
+export const savePlaylistAs = async (playlistId, name) => {
+  const res = await fetch(`${BASE_URL}/playlists/playlists/${playlistId}/save-as/`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Failed to save playlist: ${res.status}`);
+  return data;
+};
+
+export const addTrackToPlaylist = async (playlistId, trackId) => {
+  const res = await fetch(`${BASE_URL}/playlists/playlists/${playlistId}/add-track/`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ trackId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.detail || `Failed to add track: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+};
+
+export const fetchMyPlaylists = async () => {
+  const res = await fetch(`${BASE_URL}/playlists/saved-playlists/mine/?limit=200`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch saved playlists: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data) ? data : data.results ?? [];
+};
+
+// ── Group Sessions ────────────────────────────────────────────────────────────
+
+export const createGroupSession = async (displayName) => {
+  const res = await fetch(`${BASE_URL}/groups/group-sessions/`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ displayName }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Failed to create group: ${res.status}`);
+  return data;  // { groupSession, participantId }
+};
+
+export const joinGroupSession = async (code, displayName) => {
+  const res = await fetch(`${BASE_URL}/groups/group-sessions/join/`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ code: (code || '').toUpperCase(), displayName }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Failed to join group: ${res.status}`);
+  return data;  // { groupSession, participantId }
+};
+
+export const fetchGroupSession = async (groupId) => {
+  const res = await fetch(`${BASE_URL}/groups/group-sessions/${groupId}/`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch group: ${res.status}`);
+  return res.json();
+};
+
+export const attachMoodSessionToGroup = async (groupId, participantId, moodSessionId) => {
+  const res = await fetch(`${BASE_URL}/groups/group-sessions/${groupId}/attach-session/`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ participantId, moodSessionId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Failed to attach session: ${res.status}`);
+  return data;
+};
+
+export const generateGroupPlaylist = async (groupId) => {
+  const res = await fetch(`${BASE_URL}/groups/group-sessions/${groupId}/generate/`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Failed to generate: ${res.status}`);
+  return data;
 };
 
 /**

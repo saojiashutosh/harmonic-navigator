@@ -669,17 +669,18 @@ def _inferred_artist_era(track: Track) -> str | None:
 def _era_score(*, track: Track, era_preference: str | None) -> float:
     if not era_preference or era_preference == "no_preference":
         return 0.0
+    # Artist-era mapping wins over releaseYear. Spotify's release_year for
+    # classic-artist tracks routinely reflects a remaster/compilation reissue
+    # year (e.g. Kishore Kumar "Mere Naina Sawan Bhadon" returned as 2012),
+    # which would otherwise make a 2010s-filtered playlist pull in 70s playback.
+    inferred = _inferred_artist_era(track)
+    if inferred:
+        return 0.45 if inferred == era_preference else -0.70
     year = track.releaseYear
     if year is None:
-        inferred = _inferred_artist_era(track)
-        if inferred == era_preference:
-            # NULL year + artist's known era matches the request — treat as
-            # era-correct but with a smaller bonus than confirmed-year tracks
-            # so any track with a real correct year still ranks higher.
-            return 0.30
-        # Unknown era and no inference — mild penalty so confirmed tracks win,
-        # but not so harsh that the playlist becomes empty when many tracks
-        # have missing years.
+        # No year and no inference — mild penalty so confirmed tracks win,
+        # but not so harsh that the playlist collapses when many tracks have
+        # missing years.
         return -0.20
     if era_preference == "latest" and year >= 2024:
         return 0.55
@@ -713,14 +714,16 @@ def _track_matches_language(track: Track, requested_languages: list[str]) -> boo
 
 
 def _track_matches_era(track: Track, era_preference: str | None) -> bool:
-    year = track.releaseYear
     if not era_preference or era_preference == "no_preference":
         return True
+    # Artist mapping is authoritative when present (handles Spotify remaster
+    # years for classic-era artists).
+    inferred = _inferred_artist_era(track)
+    if inferred:
+        return inferred == era_preference
+    year = track.releaseYear
     if year is None:
-        # Fall back to artist-based era inference so tracks with a missing
-        # releaseYear (typically nulled-out compilation/remaster years) still
-        # surface in the right era when the artist is unambiguously classic.
-        return _inferred_artist_era(track) == era_preference
+        return False
     if era_preference == "latest":
         return year >= 2024
     if era_preference == "recent":
@@ -737,26 +740,30 @@ def _track_matches_era(track: Track, era_preference: str | None) -> bool:
 def _era_query(era_preference: str | None) -> Q:
     if not era_preference or era_preference == "no_preference":
         return Q()
-    # NULL-year tracks whose artist is known to belong to this era are pulled
-    # into the era-restricted candidate pool so they can be scored alongside
-    # year-confirmed tracks. Without this, NULL-year classics never appear in
-    # era-filtered playlists.
-    inferred_artists = [name for name, era in ARTIST_ERA.items() if era == era_preference]
-    inferred_q = (
-        Q(releaseYear__isnull=True, artistId__name__in=inferred_artists)
-        if inferred_artists else Q(pk__in=[])
-    )
+    # Artists in ARTIST_ERA: include if their era matches the request,
+    # exclude otherwise — regardless of releaseYear. This keeps Kishore Kumar
+    # / Lata Mangeshkar / etc. out of 2010s+ playlists even when Spotify
+    # stamped their tracks with a remaster reissue year.
+    matched_artists = [name for name, era in ARTIST_ERA.items() if era == era_preference]
+    wrong_artists   = [name for name, era in ARTIST_ERA.items() if era != era_preference]
+    matched_artist_q = Q(artistId__name__in=matched_artists) if matched_artists else Q(pk__in=[])
+    wrong_artist_q   = Q(artistId__name__in=wrong_artists)   if wrong_artists   else Q(pk__in=[])
+
     if era_preference == "latest":
-        return Q(releaseYear__gte=2024) | inferred_q
-    if era_preference == "recent":
-        return Q(releaseYear__gte=2020, releaseYear__lte=2023) | inferred_q
-    if era_preference == "era_2010s":
-        return Q(releaseYear__gte=2010, releaseYear__lte=2019) | inferred_q
-    if era_preference == "era_2000s":
-        return Q(releaseYear__gte=2000, releaseYear__lte=2009) | inferred_q
-    if era_preference == "nineties":
-        return Q(releaseYear__gte=1990, releaseYear__lt=2000) | inferred_q
-    return Q()
+        year_q = Q(releaseYear__gte=2024)
+    elif era_preference == "recent":
+        year_q = Q(releaseYear__gte=2020, releaseYear__lte=2023)
+    elif era_preference == "era_2010s":
+        year_q = Q(releaseYear__gte=2010, releaseYear__lte=2019)
+    elif era_preference == "era_2000s":
+        year_q = Q(releaseYear__gte=2000, releaseYear__lte=2009)
+    elif era_preference == "nineties":
+        year_q = Q(releaseYear__gte=1990, releaseYear__lt=2000)
+    else:
+        return Q()
+
+    # Match by artist OR (year match AND artist not mapped to a different era).
+    return matched_artist_q | (year_q & ~wrong_artist_q)
 
 
 def _parse_language_pref(raw_value: str | None) -> list[str]:
