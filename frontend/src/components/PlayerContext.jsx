@@ -97,6 +97,10 @@ export const PlayerProvider = ({ children }) => {
     }
   }, []);
 
+  const appendToQueue = useCallback((tracks) => {
+    setQueue(prev => [...prev, ...tracks]);
+  }, []);
+
   const closePlayer = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
@@ -129,6 +133,7 @@ export const PlayerProvider = ({ children }) => {
         playNext,
         playPrevious,
         jumpTo,
+        appendToQueue,
         closePlayer,
         setIsMinimized,
         loadPlaylist,

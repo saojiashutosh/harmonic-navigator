@@ -118,7 +118,10 @@ html, body, #root { width: 100%; height: 100%; overflow: hidden; }
 .og-logo span { font-family: var(--font-display); font-weight: var(--display-weight); font-size: 1.35rem; font-style: italic; letter-spacing: var(--display-tracking); }
 .og-nav { display: flex; gap: 1.5rem; font-size: 0.78rem; color: var(--ink-soft); font-style: italic; font-family: var(--font-display); }
 .og-nav .active { color: var(--accent); }
-.og-meta { justify-self: end; font-family: var(--font-display); font-style: italic; color: var(--ink-soft); font-size: 0.85rem; }
+.og-meta { display: none; justify-self: end; font-family: var(--font-display); font-style: italic; color: var(--ink-soft); font-size: 0.85rem; }
+.og-header-auth { justify-self: end; display: flex; align-items: center; gap: 0.75rem; }
+.og-auth-name { font-family: var(--font-display); font-style: italic; color: var(--ink-soft); font-size: 0.82rem; }
+.og-btn-sm { padding: 0.45rem 1.1rem; font-size: 0.78rem; }
 
 .og-main { position: relative; z-index: 2; flex: 1; overflow-y: auto; padding-bottom: 110px; }
 .og-main.view-results { overflow-y: hidden; padding-bottom: 0; }
@@ -514,19 +517,34 @@ html, body, #root { width: 100%; height: 100%; overflow: hidden; }
 
 /* ── Player ──────────────────────── */
 .og-player {
-  position: fixed; bottom: 0; left: 0; right: 0; height: 76px;
+  position: fixed; bottom: 0; left: 0; right: 0;
   background: color-mix(in srgb, var(--paper) 92%, transparent);
   border-top: 1px dashed var(--rule);
   backdrop-filter: blur(14px);
-  z-index: 50; overflow: hidden;
+  z-index: 50;
+  display: flex; flex-direction: column;
 }
-.og-player-glow { position: absolute; inset: 0; background: radial-gradient(ellipse at 30% 50%, var(--accent-soft), transparent 60%); animation: ogGlowBreathe 6s ease-in-out infinite; }
+.og-player-glow { position: absolute; inset: 0; background: radial-gradient(ellipse at 30% 50%, var(--accent-soft), transparent 60%); animation: ogGlowBreathe 6s ease-in-out infinite; pointer-events: none; }
 @keyframes ogGlowBreathe { 0%, 100% { opacity: 0.5; transform: translateX(-10%); } 50% { opacity: 1; transform: translateX(10%); } }
+.og-player-end {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0.4rem 2rem;
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--rule);
+  position: relative; z-index: 1;
+}
+.og-player-end-label { font-family: var(--font-display); font-style: italic; font-size: 0.72rem; color: var(--ink-faint); white-space: nowrap; letter-spacing: 0.04em; }
+.og-player-end-actions { display: flex; gap: 0.5rem; margin-left: auto; }
+.og-player-end-actions .og-btn { padding: 0.45rem 1.1rem; font-size: 0.78rem; }
+.og-player-end-btn { background: none; border: 1px solid var(--rule); color: var(--ink-soft); font-family: var(--font-body); font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 0.28rem 0.75rem; border-radius: 2px; cursor: pointer; transition: border-color 0.15s, color 0.15s, background 0.15s; white-space: nowrap; }
+.og-player-end-btn:hover:not(:disabled) { border-color: var(--ink-soft); color: var(--ink); }
+.og-player-end-primary { border-color: var(--accent); color: var(--accent); }
+.og-player-end-primary:hover:not(:disabled) { background: var(--accent); color: var(--paper); }
 .og-player-inner {
   position: relative; display: grid;
   grid-template-columns: 140px 1fr 240px auto auto;
-  align-items: center; gap: 1.25rem; padding: 0 2rem; height: 100%;
-  max-width: 1400px; margin: 0 auto;
+  align-items: center; gap: 1.25rem; padding: 0 2rem; height: 76px;
+  max-width: 1400px; margin: 0 auto; width: 100%;
 }
 .og-player-mood { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-display); font-style: italic; color: var(--accent); font-size: 0.95rem; }
 .og-pdot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 14px var(--accent); animation: ogPulse 2s infinite; }
