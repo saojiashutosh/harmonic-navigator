@@ -33,7 +33,31 @@ XLSX_PATH = Path(__file__).resolve().parents[1] / "data" / "harmonic_export.xlsx
 
 REMIX_PAT = re.compile(
     r"\bJhankar\b|\bJB\b|\bLofi\b|\bSlowed\b|\bReverb\b|\bRemaster|"
-    r"\bReprise\b|\bUnplugged\b|\bRevisited\b|\bRecreated\b|Lo[\s\-]?Fi",
+    r"\bReprise\b|\bUnplugged\b|\bRevisited\b|\bRecreated\b|Lo[\s\-]?Fi|"
+    r"\bTrap\s+Mix\b|\bQawwali\s+Version\b|\bCover\b|\bTribute\b|"
+    r"\bReimagined\b|\bRe-?make\b|\bAcoustic\s+(Version|Cover)\b|"
+    r"\bUnplugged\s+Version\b|\bSlow\s*\+\s*Reverb\b|\bRecreation\b|"
+    r"\bFlip\b|\bMashup\b|\bMedley\b",
+    re.IGNORECASE,
+)
+
+# Film-name suffix pattern for unmistakably pre-2010 Bollywood films.
+# Tracks named "Song Title - Film Name" with one of these films and a post-2010
+# release year are covers/recreations, not original soundtrack releases.
+OLD_FILM_PAT = re.compile(
+    r"\s*[-–]\s*("
+    r"Maine Pyar Kiya|Sholay|Mughal[- ]?e[- ]?Azam|Pakeezah|Bobby|Awara|"
+    r"Mother India|Anand|Aradhana|Amar Akbar Anthony|Kaalia|Don|Sangam|"
+    r"Shree 420|Tezaab|Khalnayak|Saajan|Dilwale Dulhania|"
+    r"Kuch Kuch Hota Hai|1942 A Love Story|Roja|Dil Hai Ki Maanta Nahin|"
+    r"Aashiqui|Bombay|Hum Aapke Hain Kaun|Hum Saath Saath Hain|"
+    r"Hum Dil De Chuke|Karz|Trishul|Yaarana|Naseeb|Coolie|Hero|"
+    r"Jab Jab Phool Khile|Pyar Ka Mausam|Guide|Caravan|Mera Naam Joker|"
+    r"Bombay to Goa|Sangam|Kabhi Kabhie|Mr\.? India|Tridev|Disco Dancer|"
+    r"Qayamat Se Qayamat Tak|Saagar|Hero|Karma|Naam|Andaz Apna Apna|"
+    r"Hum|Beta|Baazigar|Darr|Yes Boss|Pardes|Border|Refugee|Devdas|"
+    r"Lagaan|Kal Ho Naa Ho|Veer-Zaara|Chak De|Om Shanti Om|Rang De Basanti"
+    r")(\s+|\)|\(|$)",
     re.IGNORECASE,
 )
 
@@ -104,11 +128,11 @@ CLASSIC_ARTISTS = {
 }
 
 
-def apply_era_fix(ws) -> tuple[int, int]:
+def apply_era_fix(ws) -> tuple[int, int, int]:
     """NULL out remaster/compilation years and post-2010 classic-artist years."""
     header = [c.value for c in ws[1]]
     ti, ai, yi = header.index("title"), header.index("artist_name"), header.index("release_year")
-    n_remix = n_classic = 0
+    n_remix = n_classic = n_old_film = 0
 
     for row in ws.iter_rows(min_row=2):
         title, artist, year = row[ti].value, row[ai].value, row[yi].value
@@ -117,11 +141,14 @@ def apply_era_fix(ws) -> tuple[int, int]:
         if REMIX_PAT.search(title):
             row[yi].value = None
             n_remix += 1
+        elif OLD_FILM_PAT.search(title):
+            row[yi].value = None
+            n_old_film += 1
         elif artist in CLASSIC_ARTISTS:
             row[yi].value = None
             n_classic += 1
 
-    return n_remix, n_classic
+    return n_remix, n_classic, n_old_film
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -229,9 +256,10 @@ def main():
     wb = load_workbook(XLSX_PATH)
     ws = wb["tracks"]
 
-    n_remix, n_classic = apply_era_fix(ws)
+    n_remix, n_classic, n_old_film = apply_era_fix(ws)
     print(f"\nEra fix:")
     print(f"  remix/remaster-marker tracks nulled: {n_remix}")
+    print(f"  pre-2010-film-suffix tracks nulled:  {n_old_film}")
     print(f"  classic-artist post-2010 tracks nulled: {n_classic}")
 
     changed, before, after = apply_mood_retag(ws)
