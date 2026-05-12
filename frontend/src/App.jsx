@@ -464,7 +464,12 @@ function MoodCard({ onComplete, onGuestLimit }) {
       const inf = await API.submitAnswers(sessionId, answers);
       const pl = await API.generatePlaylist(inf.moodSessionId, 15);
       const tracks = await API.fetchPlaylistTracks(pl.id);
-      onComplete({ moodLabel: inf.moodLabel, confidence: inf.confidence, tracks: tracks.map(t => t.track), playlistId: pl.id });
+      onComplete({
+        moodLabel: inf.moodLabel,
+        confidence: inf.confidence,
+        tracks: tracks.map(t => ({ ...t.track, relevanceScore: t.relevanceScore })),
+        playlistId: pl.id,
+      });
     } catch (err) { setError('Failed: ' + err.message); setSubmitting(false); submittedRef.current = false; }
   };
 
@@ -657,6 +662,14 @@ function Results({ results, onRestart }) {
     ? queue
     : initialTracks;
   const conf = Math.round((results?.confidence || 0) * 100);
+  // Average track relevanceScore across the playlist, normalised so a
+  // typical good match (~1.8 raw) reads as ~90%. Engine raw range is 0-4
+  // but realistic per-track maxes out near 2.0 once mood + language +
+  // style + era + lyrics signals stack.
+  const avgRelevance = tracks.length
+    ? tracks.reduce((s, t) => s + (t.relevanceScore || 0), 0) / tracks.length
+    : 0;
+  const fit = Math.min(100, Math.max(0, Math.round((avgRelevance / 2.0) * 100)));
 
   const handlePlay = (i) => {
     if (queue.length > 0 && tracks.length > 0 && queue[0].id === tracks[0].id) {
@@ -674,6 +687,7 @@ function Results({ results, onRestart }) {
         <p>{meta.desc}</p>
         <div className="og-stats">
           <div><dt>match</dt><dd>{conf}%</dd></div>
+          <div><dt>song fit</dt><dd>{fit}%</dd></div>
           <div><dt>tracks</dt><dd>{tracks.length}</dd></div>
           <div><dt>length</dt><dd>~{Math.round(tracks.length * 4)}m</dd></div>
         </div>

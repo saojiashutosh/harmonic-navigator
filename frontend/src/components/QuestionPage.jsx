@@ -220,7 +220,7 @@ const QuestionPage = ({ onRestart, onComplete, onInteraction, onGenerating }) =>
         confidence: inference.confidence,
         rawScores: inference.rawScores,
         playlist,
-        tracks: playlistTracks.map(pt => pt.track),
+        tracks: playlistTracks.map(pt => ({ ...pt.track, relevanceScore: pt.relevanceScore })),
       });
       completed = true;
     } catch (err) {

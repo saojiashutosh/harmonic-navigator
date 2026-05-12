@@ -13,7 +13,12 @@ from moods.models import MoodInference, Question
 
 logger = logging.getLogger(__name__)
 
-LOGIT_SCALE = 2.4
+# Softmax temperature for converting mood logit-sums into probabilities.
+# Higher = sharper distribution = the top mood pulls further ahead of runners-up.
+# 2.4 produced ~60-80% confidence for typical answer patterns over 6 mood
+# classes, which read as low-confidence in the UI. 4.0 yields ~85-95% for
+# the same answers — closer to what users intuitively expect from a "match".
+LOGIT_SCALE = 4.0
 
 # Below this confidence, the engine blends top-2 moods equally.
 LOW_CONFIDENCE_THRESHOLD = 0.40
