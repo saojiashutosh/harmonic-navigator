@@ -1,12 +1,16 @@
-from django.shortcuts import render
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from harmonic_navigator.views import HarmonicBaseViewSet
+from helpers.cache_utils import QUESTIONS_CACHE_KEY, QUESTIONS_TTL
 from . import models, serializers, filters
 from .services import start_session, submit_answers
+
+_GUEST_MAX_SURVEYS = 2
+_SESSION_KEY = "anonymous_survey_count"
 
 
 class MoodSessionViewSet(HarmonicBaseViewSet):
@@ -18,8 +22,23 @@ class MoodSessionViewSet(HarmonicBaseViewSet):
     ordering_fields = ("createdAt", "updatedAt")
 
     def create(self, request, *args, **kwargs):
+        if request.user.is_anonymous:
+            count = request.session.get(_SESSION_KEY, 0)
+            if count >= _GUEST_MAX_SURVEYS:
+                return Response(
+                    {
+                        "detail": "You've used your 2 free surveys. Please log in to continue.",
+                        "code": "GUEST_LIMIT_REACHED",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
         session = start_session(user=request.user)
+
+        if request.user.is_anonymous:
+            request.session[_SESSION_KEY] = request.session.get(_SESSION_KEY, 0) + 1
+            request.session.modified = True
+
         return Response(
             self.get_serializer(session).data,
             status=status.HTTP_201_CREATED,
@@ -81,14 +100,22 @@ class QuestionViewSet(HarmonicBaseViewSet):
     ordering_fields = ("createdAt", "updatedAt", "order")
 
     def get_queryset(self):
-        """
-        Default list only returns active questions ordered for the wizard.
-        Pass ?isActive=false to see retired questions as well.
-        """
         qs = super().get_queryset()
         if self.request.query_params.get("isActive") != "false":
             qs = qs.filter(isActive=True)
         return qs.order_by("order")
+
+    def list(self, request, *args, **kwargs):
+        # Serve cached response for the standard active-questions request
+        # (the wizard loads this on every page visit).
+        if request.query_params.get("isActive") != "false":
+            cached = cache.get(QUESTIONS_CACHE_KEY)
+            if cached is not None:
+                return Response(cached)
+            response = super().list(request, *args, **kwargs)
+            cache.set(QUESTIONS_CACHE_KEY, response.data, QUESTIONS_TTL)
+            return response
+        return super().list(request, *args, **kwargs)
 
 
 class AnswerViewSet(HarmonicBaseViewSet):

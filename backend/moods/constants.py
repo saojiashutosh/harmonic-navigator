@@ -33,6 +33,9 @@ SYNERGY_BONUSES = [
     ({"sharp", "working", "focus"},           "focused",      0.28),
     ({"excited", "charged", "uplift"},        "energized",    0.32),
     ({"calm", "sleeping", "sleep"},           "calm",         0.25),
+    ({"sleeping", "sleep", "drained"},        "calm",         0.35),
+    ({"tense", "sleeping", "sleep"},          "calm",         0.30),
+    ({"blank", "sleeping", "sleep"},          "calm",         0.28),
     ({"tense", "drained", "escape"},          "anxious",      0.25),
     ({"happy", "social", "lyrics"},           "celebratory",  0.25),
     ({"sad", "alone", "lyrics"},              "melancholic",  0.28),
@@ -558,12 +561,12 @@ QUESTION_WEIGHTS = {
         "anxious": -0.10,
     },
     "playlist_goal_sleep": {
-        "calm": 0.68,
-        "melancholic": 0.25,
-        "focused": -0.15,
-        "energized": -0.50,
-        "celebratory": -0.50,
-        "anxious": -0.30,
+        "calm": 0.90,
+        "melancholic": 0.10,
+        "focused": -0.25,
+        "energized": -0.65,
+        "celebratory": -0.65,
+        "anxious": -0.50,
     },
     # ── time_of_day (NEW question) ────────────────────────────────────────
     "time_of_day_morning": {
@@ -591,12 +594,12 @@ QUESTION_WEIGHTS = {
         "anxious": -0.05,
     },
     "time_of_day_late_night": {
-        "melancholic": 0.35,
-        "calm": 0.15,
-        "focused": -0.10,
-        "energized": -0.25,
-        "celebratory": -0.20,
-        "anxious": 0.05,
+        "calm": 0.30,
+        "melancholic": 0.20,
+        "focused": -0.15,
+        "energized": -0.35,
+        "celebratory": -0.30,
+        "anxious": -0.05,
     },
     # ── music_era ─────────────────────────────────────────────────────────
     "music_era_latest": {

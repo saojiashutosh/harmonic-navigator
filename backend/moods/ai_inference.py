@@ -11,6 +11,9 @@ import json
 import logging
 
 import requests
+from django.core.cache import cache
+
+from helpers.cache_utils import AI_MOOD_TTL, ai_mood_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,12 @@ def ai_infer_mood(answers: list[dict]) -> tuple[str, float, str] | None:
     (mood_label, confidence, reasoning) on success, None on any failure.
     The caller must handle None gracefully.
     """
+    key = ai_mood_cache_key(answers)
+    cached = cache.get(key)
+    if cached is not None:
+        logger.debug("Groq inference cache hit for key %s", key)
+        return tuple(cached)
+
     try:
         from django.conf import settings
 
@@ -133,7 +142,9 @@ def ai_infer_mood(answers: list[dict]) -> tuple[str, float, str] | None:
 
         confidence = max(0.0, min(1.0, confidence))
         logger.info("Groq inference: mood=%s confidence=%.2f | %s", mood, confidence, reasoning)
-        return (mood, confidence, reasoning)
+        result_tuple = (mood, confidence, reasoning)
+        cache.set(key, list(result_tuple), AI_MOOD_TTL)
+        return result_tuple
 
     except Exception as exc:
         logger.warning("Groq mood inference failed (%s): %s", type(exc).__name__, exc)
