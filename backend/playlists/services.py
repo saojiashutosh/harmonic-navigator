@@ -271,13 +271,19 @@ def _build_scored_tracklist(
     scored_tracks = deduped
 
     # ── Secondary mood diversity mixing ───────────────────────────────
+    # NOTE: use playlist_mood (the effective mood after any goal override),
+    # not inference.moodLabel. When a goal override fires (e.g. uplift
+    # remaps melancholic -> celebratory), the pool no longer contains
+    # tracks of the original inferred mood — referencing inference.moodLabel
+    # here makes primary_set empty and collapses the playlist to a single
+    # diversity-slot track.
     if secondary_mood and mood_blend_ratio < 1.0:
         diversity_slots = max(1, int(limit * (1 - mood_blend_ratio) * 0.4))
         secondary_tag_ids = mood_tag_ids.get(secondary_mood, set())
         primary_set = {
             t for t, _ in scored_tracks
-            if t.primaryMood == inference.moodLabel
-            or str(t.id) in mood_tag_ids.get(inference.moodLabel, set())
+            if t.primaryMood == playlist_mood
+            or str(t.id) in mood_tag_ids.get(playlist_mood, set())
         }
         secondary_set = {
             t for t, _ in scored_tracks
