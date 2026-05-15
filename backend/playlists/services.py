@@ -250,14 +250,17 @@ def _build_scored_tracklist(
     if len(mood_matched) >= max(limit // 2, 3):
         scored_tracks = mood_matched
 
-    # ── Hard era filter: if enough era-matched tracks exist, exclude others ──
+    # ── Hard era filter: when the user picks an era, that's a hard contract ──
+    # Drop every track that doesn't match, even if the playlist ends up short.
+    # The prior "only enforce if >= limit/2 matches" threshold meant sparse-era
+    # buckets (e.g. very few "latest" Hindi focus tracks in the catalog)
+    # silently fell back to wrong-era results, which defeats the whole point
+    # of the era question.
     if era_preference and era_preference != "no_preference":
-        era_matched = [
+        scored_tracks = [
             (t, s) for t, s in scored_tracks
             if _track_matches_era(t, era_preference)
         ]
-        if len(era_matched) >= max(limit // 2, 3):
-            scored_tracks = era_matched
 
     # ── Deduplicate by base title (strip Remix/Lofi/From… variants) ───
     seen_base: set[str] = set()
@@ -661,9 +664,23 @@ def _taste_score(
     return score
 
 
+_ARTIST_ERA_NORMALIZED = {
+    re.sub(r"[\s\.\-_]+", "", name).lower(): era
+    for name, era in ARTIST_ERA.items()
+}
+
+
 def _inferred_artist_era(track: Track) -> str | None:
     artist = getattr(track.artistId, "name", None) if track.artistId_id else None
-    return ARTIST_ERA.get(artist) if artist else None
+    if not artist:
+        return None
+    direct = ARTIST_ERA.get(artist)
+    if direct:
+        return direct
+    # Tolerant lookup so spelling variants (extra spaces, "Mehmood" vs
+    # "Mahmood", "Laxmikant - Pyarelal" vs "Laxmikant-Pyarelal") still match.
+    key = re.sub(r"[\s\.\-_]+", "", artist).lower()
+    return _ARTIST_ERA_NORMALIZED.get(key)
 
 
 def _era_score(*, track: Track, era_preference: str | None) -> float:
@@ -713,6 +730,14 @@ def _track_matches_language(track: Track, requested_languages: list[str]) -> boo
     return False
 
 
+_REISSUE_TITLE_RE = re.compile(
+    r"\b(remaster(?:ed)?|reissue|jhankar|lofi|lo[\s\-]?fi|slowed|reverb|"
+    r"reprise|unplugged|revisited|recreated|cover|tribute|reimagined|"
+    r"re[\s\-]?make|mashup|medley|soundtrack\s+version)\b",
+    re.IGNORECASE,
+)
+
+
 def _track_matches_era(track: Track, era_preference: str | None) -> bool:
     if not era_preference or era_preference == "no_preference":
         return True
@@ -721,6 +746,11 @@ def _track_matches_era(track: Track, era_preference: str | None) -> bool:
     inferred = _inferred_artist_era(track)
     if inferred:
         return inferred == era_preference
+    # Remaster / reissue / cover titles can never be "latest" — the
+    # releaseYear on those Spotify records is the reissue date, not the
+    # original drop. Reject them outright when the user asked for latest.
+    if era_preference == "latest" and _REISSUE_TITLE_RE.search(track.title or ""):
+        return False
     year = track.releaseYear
     if year is None:
         return False

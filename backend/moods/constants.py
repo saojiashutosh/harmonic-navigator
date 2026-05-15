@@ -116,14 +116,13 @@ QUESTION_DEFINITIONS = [
     },
     {
         "key": "music_language",
-        "text": "Which language songs do you prefer? Select all that apply.",
+        "text": "Which language songs do you prefer?",
         "category": "preference",
-        "inputType": "multi_select",
+        "inputType": "select",
         "order": 6,
         "options": [
             {"rawValue": "hindi", "label": "Hindi"},
             {"rawValue": "marathi", "label": "Marathi"},
-            {"rawValue": "english", "label": "English"},
             {"rawValue": "no_preference", "label": "No preference"},
         ],
     },
@@ -175,7 +174,6 @@ QUESTION_DEFINITIONS = [
             {"rawValue": "era_2010s", "label": "2010s decade"},
             {"rawValue": "era_2000s", "label": "2000s nostalgia"},
             {"rawValue": "nineties", "label": "90s — 1996 to 1999"},
-            {"rawValue": "no_preference", "label": "Any era — surprise me"},
         ],
     },
 ]

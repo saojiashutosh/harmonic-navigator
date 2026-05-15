@@ -10,10 +10,11 @@ except ImportError:
     from cryptography.hazmat.primitives.ciphers.algorithms import TripleDES
 from cryptography.hazmat.primitives.ciphers import Cipher, modes
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import F, Max
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
@@ -166,6 +167,49 @@ class PlaylistViewSet(HarmonicBaseViewSet):
     @action(
         detail=True,
         methods=["post"],
+        url_path="remove-track",
+        permission_classes=[IsAuthenticated],
+    )
+    def remove_track(self, request, pk=None):
+        """Remove a track from a user-owned saved playlist and reflow positions."""
+        playlist = self.get_object()
+
+        if not models.SavedPlaylist.objects.filter(
+            userId=request.user, playlistId=playlist
+        ).exists():
+            return Response(
+                {"detail": "You can only remove tracks from playlists you've saved."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        track_id = request.data.get("trackId")
+        if not track_id:
+            return Response({"detail": "trackId is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            try:
+                pt = models.PlaylistTrack.objects.select_for_update().get(
+                    playlistId=playlist, trackId_id=track_id,
+                )
+            except models.PlaylistTrack.DoesNotExist:
+                return Response({"detail": "Track is not in this playlist."}, status=status.HTTP_404_NOT_FOUND)
+
+            removed_pos = pt.position
+            pt.delete()
+
+            # Reflow remaining positions so they stay contiguous (1..N).
+            models.PlaylistTrack.objects.filter(
+                playlistId=playlist, position__gt=removed_pos,
+            ).update(position=F("position") - 1)
+
+            new_count = models.PlaylistTrack.objects.filter(playlistId=playlist).count()
+            models.Playlist.objects.filter(pk=playlist.pk).update(trackCount=new_count)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(
+        detail=True,
+        methods=["post"],
         url_path="expand",
         permission_classes=[IsAuthenticated],
     )
@@ -220,6 +264,29 @@ class SavedPlaylistViewSet(HarmonicBaseViewSet):
             super().get_queryset()
             .select_related("playlistId")
         )
+
+    def get_permissions(self):
+        # Rename (PATCH/PUT) and delete must be authenticated; ownership is
+        # enforced in the methods below.
+        if self.action in {"update", "partial_update", "destroy"}:
+            return [IsAuthenticated()]
+        return super().get_permissions()
+
+    def _assert_owner(self, instance, request):
+        if instance.userId_id != request.user.id:
+            raise PermissionDenied("You can only modify your own playlists.")
+
+    def update(self, request, *args, **kwargs):
+        self._assert_owner(self.get_object(), request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        self._assert_owner(self.get_object(), request)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        self._assert_owner(self.get_object(), request)
+        return super().destroy(request, *args, **kwargs)
 
     @action(
         detail=False,

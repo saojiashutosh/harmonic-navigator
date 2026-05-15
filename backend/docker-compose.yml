@@ -1,3 +1,5 @@
+name: harmonic-navigator
+
 services:
   web:
     build:

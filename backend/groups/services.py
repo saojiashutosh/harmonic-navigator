@@ -142,8 +142,8 @@ def generate_group_playlist(group: GroupSession) -> Playlist:
         .select_related("moodSessionId")
         .all()
     )
-    if len(ready) < 2:
-        raise ValueError("At least two participants must be ready before blending.")
+    if len(ready) < 1:
+        raise ValueError("At least one participant must be ready before blending.")
 
     inferences = [
         MoodInference.objects.filter(moodSessionId=p.moodSessionId).first()
@@ -151,8 +151,8 @@ def generate_group_playlist(group: GroupSession) -> Playlist:
         if p.moodSessionId_id is not None
     ]
     inferences = [inf for inf in inferences if inf is not None]
-    if len(inferences) < 2:
-        raise ValueError("Not enough valid mood inferences to blend.")
+    if len(inferences) < 1:
+        raise ValueError("No valid mood inferences to blend.")
 
     primary, secondary, blend_ratio, blended_confidence = _blend_inferences(inferences)
     merged_answers = _merge_answer_maps(ready)
