@@ -286,14 +286,14 @@ function PaperBackdrop() {
 }
 
 /* ── Header ──────────────────────────────────────────────── */
-function Header({ onHome, onMyPlaylists, view }) {
-  const { user, logout, openAuth } = useAuth();
+function Header({ onHome, onMyPlaylists, onLogout, view }) {
+  const { user, openAuth } = useAuth();
 
   return (
     <header className="og-header">
       <button className="og-logo" onClick={onHome}>
         <HarmonicMark size={34} />
-        <span>Harmonic</span>
+        <span>Harmonic Navigator</span>
       </button>
       <div className="og-header-auth">
         {user ? (
@@ -305,7 +305,7 @@ function Header({ onHome, onMyPlaylists, view }) {
               my playlists
             </button>
             <span className="og-auth-name">{user.firstName}</span>
-            <button className="og-btn og-btn-ghost og-btn-sm" onClick={logout}>sign out</button>
+            <button className="og-btn og-btn-ghost og-btn-sm" onClick={onLogout}>sign out</button>
           </>
         ) : (
           <button className="og-btn og-btn-ghost og-btn-sm" onClick={() => openAuth('signin')}>sign in</button>
@@ -396,11 +396,11 @@ function AddToPlaylistPopover({ open, onClose, onPick, loading, playlists, error
 
 /* ── Hero preview card ───────────────────────────────────── */
 const PREVIEW_TRACKS = [
-  { id: 'prev-1', title: 'Blinding Lights', artistId: { name: 'The Weeknd' }, durationMinutes: '3:22', language: 'english' },
-  { id: 'prev-2', title: 'APT', artistId: { name: 'Rose' }, durationMinutes: '2:58', language: 'english' },
-  { id: 'prev-3', title: 'Levitating', artistId: { name: 'Dua Lipa' }, durationMinutes: '3:23', language: 'english' },
-  { id: 'prev-4', title: 'Flowers', artistId: { name: 'Miley Cyrus' }, durationMinutes: '3:21', language: 'english' },
-  { id: 'prev-5', title: 'Anti-Hero', artistId: { name: 'Taylor Swift' }, durationMinutes: '3:21', language: 'english' },
+  { id: 'prev-1', title: 'Kesariya', artistId: { name: 'Arijit Singh' }, durationMinutes: '4:28', language: 'hindi' },
+  { id: 'prev-2', title: 'Tum Hi Ho', artistId: { name: 'Arijit Singh' }, durationMinutes: '4:22', language: 'hindi' },
+  { id: 'prev-3', title: 'Tujh Mein Rab Dikhta Hai', artistId: { name: 'Roop Kumar Rathod' }, durationMinutes: '4:43', language: 'hindi' },
+  { id: 'prev-4', title: 'Apna Bana Le', artistId: { name: 'Arijit Singh' }, durationMinutes: '4:10', language: 'hindi' },
+  { id: 'prev-5', title: 'Kal Ho Naa Ho', artistId: { name: 'Sonu Nigam' }, durationMinutes: '5:22', language: 'hindi' },
 ];
 
 function HeroPreviewCard() {
@@ -542,7 +542,10 @@ function MoodCard({ onComplete, onGuestLimit, groupContext }) {
       try {
         const [qs, sess] = await Promise.all([API.fetchQuestions(), API.createMoodSession()]);
         if (cancelled) return;
-        setQuestions(qs); setSessionId(sess.id); setLoading(false);
+        // Force music_language to single-select even if the API still says multi_select
+        // (until sync_mood_questions has been run against the DB).
+        const normalized = qs.map(q => q.key === 'music_language' ? { ...q, inputType: 'select' } : q);
+        setQuestions(normalized); setSessionId(sess.id); setLoading(false);
       } catch (err) {
         if (cancelled) return;
         if (err.status === 403 && err.code === 'GUEST_LIMIT_REACHED') {
@@ -569,11 +572,18 @@ function MoodCard({ onComplete, onGuestLimit, groupContext }) {
     }
     setBleedKey(`${q.key}-${v}-${Date.now()}`);
   };
-  // Only single-select questions are mandatory; text and multi_select are optional
+  // Slider counts every question; submit is still gated only by single-selects
+  // (multi_select + text remain optional — leaving them blank doesn't block).
   const selectRequired = questions.filter(q => q.inputType === 'select');
   const selectAnswered = selectRequired.filter(q => answers[q.key] !== undefined).length;
-  const total = selectRequired.length || 1;
-  const answered = selectAnswered;
+  const hasAnswer = (q) => {
+    const v = answers[q.key];
+    if (q.inputType === 'multi_select') return Array.isArray(v) && v.length > 0;
+    if (q.inputType === 'text') return q.key in answers;  // typed OR skipped both count
+    return v !== undefined;
+  };
+  const total = questions.length || 1;
+  const answered = questions.filter(hasAnswer).length;
   const ready = selectRequired.length > 0 && selectAnswered >= selectRequired.length;
   const remaining = selectRequired.length - selectAnswered;
 
@@ -660,7 +670,9 @@ function MoodCard({ onComplete, onGuestLimit, groupContext }) {
                   <p className="og-multi-hint">select all that apply</p>
                 )}
                 <div className="og-options">
-                  {(q.options || []).map(opt => {
+                  {(q.options || [])
+                    .filter(opt => !(q.key === 'music_era' && opt.rawValue === 'no_preference'))
+                    .map(opt => {
                     const active = q.inputType === 'multi_select'
                       ? Array.isArray(answers[q.key]) && answers[q.key].includes(opt.rawValue)
                       : answers[q.key] === opt.rawValue;
@@ -918,13 +930,70 @@ function Results({ results, onRestart }) {
 
 /* ── My Playlists view ─────────────────────────────────── */
 function MyPlaylists({ onBack }) {
-  const { loadPlaylist } = usePlayer();
+  const player = usePlayer();
+  const { loadPlaylist, togglePlay } = player;
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [openId, setOpenId] = useState(null);
   const [openTracks, setOpenTracks] = useState([]);
   const [tracksLoading, setTracksLoading] = useState(false);
+  const [playingId, setPlayingId] = useState(null);
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deletingId, setDeletingId] = useState(null);
+  const [menuOpenId, setMenuOpenId] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  // Close the kebab menu on any outside click
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const close = () => setMenuOpenId(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [menuOpenId]);
+
+  const beginRename = (sp) => { setRenamingId(sp.id); setRenameValue(sp.name || ''); };
+  const cancelRename = () => { setRenamingId(null); setRenameValue(''); };
+  const submitRename = async () => {
+    const name = renameValue.trim();
+    if (!name || !renamingId) return;
+    setBusy(true);
+    try {
+      const updated = await API.renameSavedPlaylist(renamingId, name);
+      setItems(prev => prev.map(it => it.id === renamingId ? { ...it, name: updated.name ?? name } : it));
+      cancelRename();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  const removeTrack = async (sp, track) => {
+    const pid = sp.playlist?.id || sp.playlistId;
+    if (!pid || !track?.id) return;
+    setBusy(true);
+    try {
+      await API.removeTrackFromPlaylist(pid, track.id);
+      setOpenTracks(prev => prev.filter(t => t.id !== track.id));
+      setItems(prev => prev.map(it =>
+        it.id === sp.id
+          ? { ...it, playlist: { ...(it.playlist || {}), trackCount: Math.max(0, (it.playlist?.trackCount || 0) - 1) } }
+          : it
+      ));
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const confirmDelete = async () => {
+    if (!deletingId) return;
+    setBusy(true);
+    try {
+      await API.deleteSavedPlaylist(deletingId);
+      setItems(prev => prev.filter(it => it.id !== deletingId));
+      if (openId === deletingId) { setOpenId(null); setOpenTracks([]); }
+      if (playingId === deletingId) setPlayingId(null);
+      setDeletingId(null);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -955,11 +1024,156 @@ function MyPlaylists({ onBack }) {
     try {
       const rows = await API.fetchPlaylistTracks(pid);
       loadPlaylist(rows.map(t => t.track), idx, sp.playlist?.moodLabel || '', '#C26F3C');
+      setPlayingId(sp.id);
     } catch (e) { setError(e.message); }
+  };
+
+  const handlePlayClick = (sp) => {
+    if (playingId === sp.id && player.hasQueue) {
+      togglePlay();
+    } else {
+      playSaved(sp, 0);
+    }
+  };
+
+  const playLabel = (sp) => {
+    if (playingId === sp.id && player.hasQueue) {
+      return player.isPlaying ? 'playing ❚❚' : 'paused ▸';
+    }
+    return 'play ▸';
   };
 
   if (loading) return <OrbitalLoader label="opening your shelf…" />;
   if (error) return <div className="og-loading"><p>{error}</p></div>;
+
+  // Detail view: sidebar of all playlists + viewed playlist's tracks on the right
+  if (openId) {
+    const sp = items.find(i => i.id === openId);
+    if (sp) {
+      const moodLabel = sp.playlist?.moodLabel || '';
+      const meta = HS.moodMeta(moodLabel);
+      const tracks = openTracks;
+      const trackCount = tracks.length || sp.playlist?.trackCount || 0;
+      return (
+        <div className="og-mylists og-mylists-detail">
+          <div className="og-mld-layout">
+            <aside className="og-mld-sidebar">
+              <div className="og-mld-sidebar-head">
+                <span className="og-eyebrow">your shelf</span>
+                <button className="og-btn og-btn-ghost og-btn-sm" onClick={onBack}>← home</button>
+              </div>
+              <div className="og-mld-list">
+                {items.map(it => {
+                  const isOpen = it.id === openId;
+                  const isPlayingThis = playingId === it.id && player.hasQueue;
+                  return (
+                    <div
+                      key={it.id}
+                      className={`og-mld-item ${isOpen ? 'is-open' : ''} ${isPlayingThis ? 'is-playing' : ''}`}
+                      onClick={() => openOne(it)}
+                    >
+                      <div className="og-mld-item-info">
+                        <span className="og-mld-item-name">{it.name || 'untitled'}</span>
+                        <span className="og-mld-item-meta">
+                          {(it.playlist?.moodLabel || '—')} · {it.playlist?.trackCount || 0}
+                        </span>
+                      </div>
+                      <button
+                        className={`og-pp og-mld-item-play ${isPlayingThis ? 'is-playing' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); handlePlayClick(it); }}
+                      >
+                        {isPlayingThis && player.isPlaying ? '❚❚' : '▶'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </aside>
+            <section className="og-mld-main">
+              <header className="og-mld-header">
+                <div className="og-mld-header-text">
+                  <span className="og-eyebrow">{(meta.label || '—').toLowerCase()}</span>
+                  {renamingId === sp.id ? (
+                    <input
+                      autoFocus
+                      className="og-ml-rename-input og-mld-rename-input"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') cancelRename(); }}
+                      disabled={busy}
+                    />
+                  ) : (
+                    <h1>{(sp.name || meta.label || 'playlist').toLowerCase()}.</h1>
+                  )}
+                  <span className="og-mld-header-meta">
+                    {trackCount} tracks · ~{Math.round(trackCount * 4)}m · {(meta.label || '—').toLowerCase()}
+                  </span>
+                </div>
+                <div className="og-mld-header-cta">
+                  {renamingId === sp.id ? (
+                    <>
+                      <button className="og-btn og-btn-primary og-btn-sm" onClick={submitRename} disabled={busy || !renameValue.trim()}>save</button>
+                      <button className="og-btn og-btn-ghost og-btn-sm" onClick={cancelRename} disabled={busy}>cancel</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="og-btn og-btn-primary og-btn-sm" onClick={() => handlePlayClick(sp)}>{playLabel(sp)}</button>
+                      <div className="og-ml-menu-wrap" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="og-ml-menu-btn"
+                          onClick={() => setMenuOpenId(menuOpenId === sp.id ? null : sp.id)}
+                          aria-label="more actions"
+                        >⋯</button>
+                        {menuOpenId === sp.id && (
+                          <div className="og-ml-menu og-ml-menu-right">
+                            <button className="og-ml-menu-item" onClick={() => { setMenuOpenId(null); beginRename(sp); }}>rename</button>
+                            <button className="og-ml-menu-item og-ml-menu-danger" onClick={() => { setMenuOpenId(null); setDeletingId(sp.id); }}>delete</button>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </header>
+              <div className="og-mld-tracks">
+                <div className="og-tl-head"><span>nº</span><span>track</span><span>artist</span><span>lang</span><span>time</span><span></span></div>
+                {tracksLoading ? (
+                  <p style={{ padding: '1rem', color: 'var(--ink-soft)' }}>loading…</p>
+                ) : tracks.map((t, i) => {
+                  const active = player.currentTrack && player.currentTrack.id === t.id;
+                  return (
+                    <div key={t.id || i} className={`og-track ${active ? 'is-active' : ''}`}>
+                      <button className="og-track-main" onClick={() => playSaved(sp, i)}>
+                        <span className="og-tr-n">{String(i + 1).padStart(2, '0')}</span>
+                        <span className="og-tr-t">{t.title}{active && <em> · {player.isPlaying ? 'playing' : 'paused'}</em>}</span>
+                        <span className="og-tr-a">{t.artistId?.name || t.artistName}</span>
+                        <span className="og-tr-l">{t.language}</span>
+                        <span className="og-tr-d">{t.durationMinutes}</span>
+                      </button>
+                      <button
+                        className="og-tr-remove"
+                        title="remove from playlist"
+                        aria-label="remove from playlist"
+                        onClick={(e) => { e.stopPropagation(); removeTrack(sp, t); }}
+                        disabled={busy}
+                      >×</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
+          <DeleteConfirmModal
+            open={!!deletingId}
+            busy={busy}
+            name={items.find(i => i.id === deletingId)?.name || 'this playlist'}
+            onCancel={() => setDeletingId(null)}
+            onConfirm={confirmDelete}
+          />
+        </div>
+      );
+    }
+  }
 
   return (
     <div className="og-mylists">
@@ -976,39 +1190,87 @@ function MyPlaylists({ onBack }) {
       ) : (
         <div className="og-ml-grid">
           {items.map(sp => {
-            const expanded = openId === sp.id;
+            const isPlayingThis = playingId === sp.id && player.hasQueue;
+            const isRenaming = renamingId === sp.id;
             return (
-              <div key={sp.id} className={`og-ml-card ${expanded ? 'is-open' : ''}`}>
-                <div className="og-ml-card-head">
-                  <div>
-                    <h3>{sp.name || 'untitled'}</h3>
+              <div key={sp.id} className={`og-ml-card ${isPlayingThis ? 'is-playing' : ''}`}>
+                <div className="og-ml-card-top">
+                  <div className="og-ml-card-info">
+                    {isRenaming ? (
+                      <input
+                        autoFocus
+                        className="og-ml-rename-input"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') submitRename(); if (e.key === 'Escape') cancelRename(); }}
+                        disabled={busy}
+                      />
+                    ) : (
+                      <h3>{sp.name || 'untitled'}</h3>
+                    )}
                     <span className="og-ml-meta">
                       {(sp.playlist?.moodLabel || '—')} · {sp.playlist?.trackCount || 0} tracks
                     </span>
                   </div>
-                  <div className="og-ml-actions">
-                    <button className="og-btn og-btn-primary og-btn-sm" onClick={() => playSaved(sp)}>play ▸</button>
-                    <button className="og-btn og-btn-ghost og-btn-sm" onClick={() => expanded ? setOpenId(null) : openOne(sp)}>
-                      {expanded ? 'hide' : 'view'}
-                    </button>
+                  <button
+                    className={`og-pp og-ml-card-play ${isPlayingThis ? 'is-playing' : ''}`}
+                    onClick={() => handlePlayClick(sp)}
+                    aria-label={playLabel(sp)}
+                  >
+                    {isPlayingThis && player.isPlaying ? '❚❚' : '▶'}
+                  </button>
+                  <div className="og-ml-menu-wrap" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="og-ml-menu-btn"
+                      onClick={() => setMenuOpenId(menuOpenId === sp.id ? null : sp.id)}
+                      aria-label="more actions"
+                    >⋯</button>
+                    {menuOpenId === sp.id && (
+                      <div className="og-ml-menu">
+                        <button className="og-ml-menu-item" onClick={() => { setMenuOpenId(null); beginRename(sp); }}>rename</button>
+                        <button className="og-ml-menu-item og-ml-menu-danger" onClick={() => { setMenuOpenId(null); setDeletingId(sp.id); }}>delete</button>
+                      </div>
+                    )}
                   </div>
                 </div>
-                {expanded && (
-                  <div className="og-ml-tracks">
-                    {tracksLoading ? <p>loading…</p> : openTracks.map((t, i) => (
-                      <button key={t.id} className="og-ml-track" onClick={() => playSaved(sp, i)}>
-                        <span>{String(i + 1).padStart(2, '0')}</span>
-                        <span>{t.title}</span>
-                        <span>{t.artistId?.name || t.artistName}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <div className="og-ml-card-actions">
+                  {isRenaming ? (
+                    <>
+                      <button className="og-btn og-btn-primary og-btn-sm" onClick={submitRename} disabled={busy || !renameValue.trim()}>save</button>
+                      <button className="og-btn og-btn-ghost og-btn-sm" onClick={cancelRename} disabled={busy}>cancel</button>
+                    </>
+                  ) : (
+                    <button className="og-btn og-btn-ghost og-btn-sm" onClick={() => openOne(sp)}>view</button>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
       )}
+      <DeleteConfirmModal
+        open={!!deletingId}
+        busy={busy}
+        name={items.find(i => i.id === deletingId)?.name || 'this playlist'}
+        onCancel={() => setDeletingId(null)}
+        onConfirm={confirmDelete}
+      />
+    </div>
+  );
+}
+
+function DeleteConfirmModal({ open, busy, name, onCancel, onConfirm }) {
+  if (!open) return null;
+  return (
+    <div className="og-modal-backdrop" onClick={onCancel}>
+      <div className="og-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>delete playlist?</h3>
+        <p className="og-modal-sub">“{name}” will be permanently removed from your shelf. this can't be undone.</p>
+        <div className="og-modal-actions">
+          <button className="og-btn og-btn-ghost" onClick={onCancel} disabled={busy}>cancel</button>
+          <button className="og-btn og-btn-primary og-modal-danger" onClick={onConfirm} disabled={busy}>{busy ? 'deleting…' : 'delete'}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1142,22 +1404,29 @@ function GroupNameModal({ open, title, cta, requireCode, initialCode = '', onClo
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
-  useEffect(() => { if (open) { setName(''); setCode(initialCode || ''); setErr(null); } }, [open, initialCode]);
+  useEffect(() => { if (open) { setName(''); setCode(initialCode || ''); setErr(null); setBusy(false); } }, [open, initialCode]);
   if (!open) return null;
 
   const go = async (e) => {
     e?.preventDefault?.();
+    if (busy) return;
     if (!name.trim()) { setErr('your name, please'); return; }
     if (requireCode && !code.trim()) { setErr('enter the group code'); return; }
     setBusy(true); setErr(null);
-    try { await onSubmit({ name: name.trim(), code: code.trim().toUpperCase() }); }
-    catch (e) { setErr(e.message || 'could not continue'); setBusy(false); }
+    try {
+      await onSubmit({ name: name.trim(), code: code.trim().toUpperCase() });
+    } catch (e) {
+      setErr(e.message || 'could not continue');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <div className="og-modal-backdrop" onClick={onClose}>
+    <div className="og-modal-backdrop" onClick={busy ? undefined : onClose}>
       <form className="og-modal" onClick={e => e.stopPropagation()} onSubmit={go}>
         <h3>{title}</h3>
+        <span className="og-modal-hint">everyone needs to be on the same wifi to listen together</span>
         {requireCode && (
           <input
             autoFocus
@@ -1224,7 +1493,7 @@ function GroupLobby({ group: initialGroup, role, participantId, onTakeSurvey, on
   const me = group.participants?.find(p => p.id === participantId);
   const readyCount = (group.participants || []).filter(p => p.isReady).length;
   const total = group.participants?.length || 0;
-  const canGenerate = role === 'host' && readyCount >= 2;
+  const canGenerate = role === 'host' && readyCount >= 1;
   // The phone can't reach the laptop's "localhost" — when the host opens the
   // app on localhost we discover the laptop's LAN address via a WebRTC ICE
   // candidate (the browser already knows it; we don't actually open a peer
@@ -1369,9 +1638,9 @@ function GroupLobby({ group: initialGroup, role, participantId, onTakeSurvey, on
                 className="og-btn og-btn-primary"
                 disabled={!canGenerate || generating}
                 onClick={handleGenerate}
-                title={canGenerate ? '' : 'need at least two people ready'}
+                title={canGenerate ? '' : 'waiting for someone to finish their survey'}
               >
-                {generating ? 'blending…' : (canGenerate ? 'blend & play ▸' : `${Math.max(0, 2 - readyCount)} more needed`)}
+                {generating ? 'blending…' : (canGenerate ? 'blend & play ▸' : 'waiting…')}
               </button>
             )}
             <button className="og-btn og-btn-ghost og-btn-sm" onClick={onLeave}>leave</button>
@@ -1391,7 +1660,26 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showJoinGroup, setShowJoinGroup] = useState(false);
   const [joinCodeSeed, setJoinCodeSeed] = useState('');
+  const [showGuestPrompt, setShowGuestPrompt] = useState(false);
+  const [farewell, setFarewell] = useState(null);
   const { closePlayer } = usePlayer();
+  const { user, authReady, openAuth, logout } = useAuth();
+
+  const handleStartSession = () => {
+    if (authReady && !user) { setShowGuestPrompt(true); return; }
+    setView('mood');
+  };
+
+  const handleLogout = async () => {
+    const name = user?.firstName;
+    closePlayer();
+    setResults(null);
+    setGroupCtx(null);
+    setView('home');
+    try { await logout(); } catch (_) { /* swallow — UI has already navigated */ }
+    setFarewell(name ? `see you soon, ${name} ✿` : 'see you soon ✿');
+    setTimeout(() => setFarewell(null), 2800);
+  };
 
   const onComplete = (data) => {
     if (data?.groupReturn) {
@@ -1454,11 +1742,12 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
         view={view}
         onHome={() => { setView('home'); setResults(null); }}
         onMyPlaylists={() => setView('mylists')}
+        onLogout={handleLogout}
       />
       <main className={`og-main view-${view}`}>
         {view === 'home' && (
           <Landing
-            onStart={() => setView('mood')}
+            onStart={handleStartSession}
             onStartGroup={() => setShowCreateGroup(true)}
             onJoinGroup={() => setShowJoinGroup(true)}
           />
@@ -1503,6 +1792,34 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
         onClose={() => { setShowJoinGroup(false); setJoinCodeSeed(''); }}
         onSubmit={handleJoinGroup}
       />
+      <GuestSessionPrompt
+        open={showGuestPrompt}
+        onClose={() => setShowGuestPrompt(false)}
+        onContinue={() => { setShowGuestPrompt(false); setView('mood'); }}
+        onSignIn={() => { setShowGuestPrompt(false); openAuth('signin'); }}
+        onSignUp={() => { setShowGuestPrompt(false); openAuth('signup'); }}
+      />
+      {farewell && <div className="og-toast og-toast-farewell">{farewell}</div>}
+    </div>
+  );
+}
+
+function GuestSessionPrompt({ open, onClose, onContinue, onSignIn, onSignUp }) {
+  if (!open) return null;
+  return (
+    <div className="og-modal-backdrop" onClick={onClose}>
+      <div className="og-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
+        <h3>you're not signed in</h3>
+        <p className="og-modal-body">
+          Sign in to save playlists, unlock full 60-track sessions, and pick up where you left off.
+          You can still take the survey and listen to <em>15 songs</em> as a guest.
+        </p>
+        <div className="og-modal-actions og-modal-actions-stack">
+          <button type="button" className="og-btn og-btn-primary" onClick={onSignIn}>sign in</button>
+          <button type="button" className="og-btn og-btn-ghost" onClick={onSignUp}>create account</button>
+          <button type="button" className="og-btn og-btn-ghost og-btn-sm" onClick={onContinue}>continue as guest →</button>
+        </div>
+      </div>
     </div>
   );
 }

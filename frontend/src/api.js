@@ -1,7 +1,25 @@
+import HS from './utils/HarmonicShared';
+
 // API calls go same-origin (e.g. /moods/..., /groups/...). Vite's dev server
 // proxies those paths to Django on :8000 — see vite.config.js. This means the
 // phone only ever needs to reach the Vite port; the backend stays internal.
 const BASE_URL = '';
+
+// Strip HTML entities from the user-visible string fields of a track object.
+// Upstream sources (e.g. JioSaavn) occasionally serve titles like
+// `From &quot;Aashiqui 2&quot;` — decode once at the API boundary so the UI
+// never has to think about it.
+const cleanTrack = (t) => {
+  if (!t || typeof t !== 'object') return t;
+  return {
+    ...t,
+    title: HS.decodeHtml(t.title),
+    artistName: HS.decodeHtml(t.artistName),
+    album: HS.decodeHtml(t.album),
+    artistId: t.artistId ? { ...t.artistId, name: HS.decodeHtml(t.artistId.name) } : t.artistId,
+  };
+};
+const cleanPlaylistTrackRow = (row) => row?.track ? { ...row, track: cleanTrack(row.track) } : row;
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
@@ -111,7 +129,9 @@ export const generatePlaylist = async (moodSessionId, limit = 10) => {
     body: JSON.stringify({ moodSessionId, limit }),
   });
   if (!res.ok) throw new Error(`Failed to generate playlist: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  if (data && Array.isArray(data.tracks)) data.tracks = data.tracks.map(cleanTrack);
+  return data;
 };
 
 export const expandPlaylist = async (playlistId) => {
@@ -134,7 +154,8 @@ export const fetchPlaylistTracks = async (playlistId, { offset = 0, limit = 200 
   );
   if (!res.ok) throw new Error(`Failed to fetch playlist tracks: ${res.status}`);
   const data = await res.json();
-  return Array.isArray(data) ? data : data.results ?? [];
+  const rows = Array.isArray(data) ? data : data.results ?? [];
+  return rows.map(cleanPlaylistTrackRow);
 };
 
 // ── Saved Playlists ───────────────────────────────────────────────────────────
@@ -148,6 +169,18 @@ export const savePlaylistAs = async (playlistId, name) => {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || `Failed to save playlist: ${res.status}`);
   return data;
+};
+
+export const removeTrackFromPlaylist = async (playlistId, trackId) => {
+  const res = await fetch(`${BASE_URL}/playlists/playlists/${playlistId}/remove-track/`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ trackId }),
+  });
+  if (!res.ok && res.status !== 204) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `Failed to remove track: ${res.status}`);
+  }
 };
 
 export const addTrackToPlaylist = async (playlistId, trackId) => {
@@ -172,6 +205,28 @@ export const fetchMyPlaylists = async () => {
   if (!res.ok) throw new Error(`Failed to fetch saved playlists: ${res.status}`);
   const data = await res.json();
   return Array.isArray(data) ? data : data.results ?? [];
+};
+
+export const renameSavedPlaylist = async (savedPlaylistId, name) => {
+  const res = await fetch(`${BASE_URL}/playlists/saved-playlists/${savedPlaylistId}/`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify({ name }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Failed to rename playlist: ${res.status}`);
+  return data;
+};
+
+export const deleteSavedPlaylist = async (savedPlaylistId) => {
+  const res = await fetch(`${BASE_URL}/playlists/saved-playlists/${savedPlaylistId}/`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (!res.ok && res.status !== 204) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `Failed to delete playlist: ${res.status}`);
+  }
 };
 
 // ── Group Sessions ────────────────────────────────────────────────────────────

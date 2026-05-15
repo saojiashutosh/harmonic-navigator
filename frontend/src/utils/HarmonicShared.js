@@ -124,5 +124,31 @@ function moodMeta(label) {
     { label: label || 'Curated', desc: 'A sound that resonates with you.', shape: 'still' };
 }
 
-const HarmonicShared = { getEnergy, waveformPath, humanize, copyFor, moodMeta, MOODS };
+// Decode HTML entities ("From &quot;X&quot;" → "From \"X\"") that some upstream
+// sources (e.g. JioSaavn) embed in song titles and artist names.
+const HTML_ENTITY_MAP = {
+  '&quot;': '"',
+  '&#34;':  '"',
+  '&apos;': "'",
+  '&#39;':  "'",
+  '&amp;':  '&',
+  '&#38;':  '&',
+  '&lt;':   '<',
+  '&gt;':   '>',
+  '&nbsp;': ' ',
+  '&#x27;': "'",
+  '&#x2F;': '/',
+  '&#x60;': '`',
+};
+function decodeHtml(s) {
+  if (s == null) return s;
+  const str = String(s);
+  if (str.indexOf('&') === -1) return str;
+  return str
+    .replace(/&(?:quot|apos|amp|lt|gt|nbsp|#34|#38|#39|#x27|#x2F|#x60);/g, m => HTML_ENTITY_MAP[m] || m)
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
+const HarmonicShared = { getEnergy, waveformPath, humanize, copyFor, moodMeta, MOODS, decodeHtml };
 export default HarmonicShared;

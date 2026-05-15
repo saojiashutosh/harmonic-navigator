@@ -120,13 +120,26 @@ html, body { width: 100%; height: 100%; -webkit-text-size-adjust: 100%; }
 .og-meta { display: none; justify-self: end; font-family: var(--font-display); font-style: italic; color: var(--ink-soft); font-size: 0.85rem; }
 .og-header-auth { justify-self: end; display: flex; align-items: center; gap: 0.6rem; }
 .og-auth-name { font-family: var(--font-display); font-style: italic; color: var(--ink-soft); font-size: 0.82rem; }
-.og-header-auth .og-btn-sm { font-family: var(--font-display); font-style: italic; font-size: 0.82rem; padding: 0.28rem 0.75rem; }
-.og-btn-sm { padding: 0.32rem 0.85rem; font-size: 0.78rem; }
+.og-header-auth .og-btn-sm { font-size: 0.82rem; padding: 0.28rem 0.75rem; }
+.og-btn.og-btn-sm { padding: 0.32rem 0.85rem; font-size: 0.78rem; gap: 0.3rem; }
 
 .og-main { position: relative; z-index: 2; flex: 1; overflow-y: auto; padding-bottom: 110px; }
 .og-main.view-results { overflow-y: hidden; padding-bottom: 0; }
-.og-main::-webkit-scrollbar { width: 6px; }
-.og-main::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
+/* ── Themed scrollbars (global) ────────── */
+.og-shell { scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+.og-shell *::-webkit-scrollbar { width: 8px; height: 8px; }
+.og-shell *::-webkit-scrollbar-track { background: transparent; }
+.og-shell *::-webkit-scrollbar-thumb {
+  background: var(--rule);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.2s;
+}
+.og-shell *::-webkit-scrollbar-thumb:hover { background: var(--accent-bleed); background-clip: padding-box; }
+.og-shell *::-webkit-scrollbar-corner { background: transparent; }
+
+.og-main::-webkit-scrollbar { width: 8px; }
 
 /* View transition — soft ink fade */
 .og-main.view-home, .og-main.view-mood, .og-main.view-results { animation: ogViewIn 0.55s ease-out; }
@@ -140,7 +153,8 @@ html, body { width: 100%; height: 100%; -webkit-text-size-adjust: 100%; }
   display: inline-flex; align-items: center; gap: 0.6rem;
   padding: 0.85rem 1.6rem; border-radius: 999px;
   border: 1px solid transparent; cursor: pointer;
-  font-family: inherit; font-size: 0.92rem;
+  font-family: var(--font-display); font-style: italic; font-weight: var(--display-weight);
+  font-size: 0.92rem; letter-spacing: 0;
   transition: all 0.25s ease;
 }
 .og-btn-primary { background: var(--accent); color: var(--paper-fab); }
@@ -485,7 +499,7 @@ html, body { width: 100%; height: 100%; -webkit-text-size-adjust: 100%; }
 
 /* ── Results ─────────────────────── */
 .og-results { display: grid; grid-template-columns: 260px 1fr; gap: 0; height: 100%; }
-.og-r-left { padding: 3rem 2.5rem 3rem 2rem; align-self: start; overflow-y: auto; height: 100%; box-sizing: border-box; }
+.og-r-left { padding: 3rem 2.5rem 140px 2rem; align-self: start; overflow-y: auto; height: 100%; box-sizing: border-box; }
 
 /* Deckle-edge frame for the sigil */
 .og-sigil-frame {
@@ -581,6 +595,19 @@ html, body { width: 100%; height: 100%; -webkit-text-size-adjust: 100%; }
 .og-track:hover .og-tr-add { opacity: 1; }
 .og-tr-add:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 
+.og-tr-remove {
+  position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--paper-2); border: 1px dashed var(--rule);
+  color: var(--ink-soft); font-size: 1.15rem; line-height: 1; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-body); font-style: normal;
+  opacity: 0; transition: all 0.18s;
+}
+.og-track:hover .og-tr-remove { opacity: 1; }
+.og-tr-remove:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.og-tr-remove:disabled { cursor: not-allowed; opacity: 0.3 !important; }
+
 /* ── Save-as modal ──────────────────── */
 .og-modal-backdrop {
   position: fixed; inset: 0; background: rgba(58, 50, 42, 0.35);
@@ -606,7 +633,12 @@ html, body { width: 100%; height: 100%; -webkit-text-size-adjust: 100%; }
 }
 .og-modal-input:focus { border-color: var(--accent); border-style: solid; }
 .og-modal-err { color: var(--accent); font-size: 0.85rem; }
+.og-modal-hint { color: var(--ink-soft); font-size: 0.85rem; font-style: italic; }
 .og-modal-actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 0.5rem; }
+.og-modal-actions-stack { flex-direction: column; align-items: stretch; gap: 0.5rem; }
+.og-modal-actions-stack .og-btn { width: 100%; justify-content: center; }
+.og-modal-body { color: var(--ink-soft); font-size: 0.95rem; line-height: 1.55; margin: 0.2rem 0 0.3rem; }
+.og-modal-body em { color: var(--ink); font-style: italic; }
 
 /* ── Add-to-playlist popover ────────── */
 .og-pop-backdrop {
@@ -650,23 +682,116 @@ html, body { width: 100%; height: 100%; -webkit-text-size-adjust: 100%; }
   from { opacity: 0; transform: translate(-50%, 8px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
+.og-toast-farewell {
+  font-family: var(--font-display); font-style: italic;
+  background: var(--paper-fab); color: var(--ink);
+  border: 1px solid var(--rule);
+  padding: 0.7rem 1.4rem; font-size: 1rem;
+}
 
 /* ── My Playlists view ──────────── */
-.og-mylists { padding: 2.5rem 3rem 140px; max-width: 1100px; margin: 0 auto; }
+.og-mylists { padding: 2.5rem 3rem 140px; max-width: 1280px; margin: 0 auto; }
+.og-mylists.og-mylists-detail { padding: 0; max-width: none; height: calc(100dvh - 80px); }
+
+/* My Playlists — detail layout: sidebar + main */
+.og-mld-layout { display: grid; grid-template-columns: 300px 1fr; height: 100%; }
+.og-mld-sidebar { border-right: 1px dashed var(--rule); display: flex; flex-direction: column; min-height: 0; }
+.og-mld-sidebar-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 1.5rem 1.25rem 1rem; border-bottom: 1px dashed var(--rule); }
+.og-mld-sidebar-head .og-eyebrow { margin: 0; }
+.og-mld-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0.5rem 0.75rem 140px; }
+.og-mld-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.65rem 0.75rem; border-radius: 6px; border: 1px solid transparent; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.og-mld-item:hover { background: var(--paper-2); }
+.og-mld-item.is-open { background: var(--paper-active); border-color: var(--rule); }
+.og-mld-item.is-playing .og-mld-item-name { color: var(--accent); }
+.og-mld-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.og-mld-item-name { font-family: var(--font-display); font-style: italic; font-size: 1rem; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.og-mld-item-meta { font-size: 0.72rem; color: var(--ink-soft); text-transform: lowercase; }
+.og-mld-item-play { flex-shrink: 0; border-radius: 50%; border: none; cursor: pointer; font-family: var(--font-body); font-style: normal; }
+.og-mld-item-play.og-pp { width: 32px !important; height: 32px !important; font-size: 0.85rem; }
+
+.og-mld-main { display: flex; flex-direction: column; min-height: 0; }
+.og-mld-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1.75rem 2rem 1.25rem; border-bottom: 1px dashed var(--rule); flex-wrap: nowrap; }
+.og-mld-header-text { min-width: 0; flex: 1; }
+.og-mld-header-text .og-eyebrow { margin-bottom: 0.4rem; }
+.og-mld-header-text h1 { font-family: var(--font-display); font-style: italic; font-size: 2.2rem; color: var(--accent); line-height: 1.1; margin: 0 0 0.4rem; word-break: break-word; }
+.og-mld-header-meta { font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-faint); letter-spacing: 0.06em; text-transform: lowercase; }
+.og-mld-header-cta { display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
+.og-mld-header-cta .og-btn { padding: 0.5rem 1.2rem; font-size: 0.85rem; }
+.og-mld-tracks { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.5rem 140px; }
+
+/* Playing-state on the grid card play button */
+.og-ml-card.is-playing { border-style: solid; border-color: var(--accent-bleed); }
+.og-btn.og-btn-primary.is-playing { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .og-ml-head { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 2rem; }
 .og-ml-head h1 { font-family: var(--font-display); font-size: 2.5rem; font-style: italic; color: var(--ink); }
 .og-ml-head p { color: var(--ink-soft); max-width: 520px; }
 .og-ml-head .og-btn { align-self: flex-start; margin-top: 0.5rem; }
 .og-ml-empty { padding: 3rem; text-align: center; color: var(--ink-soft); border: 1px dashed var(--rule); border-radius: 6px; }
 .og-ml-empty em { color: var(--accent); font-style: italic; }
-.og-ml-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
-.og-ml-card { background: var(--paper-2); border: 1px dashed var(--rule); border-radius: 6px; padding: 1.2rem; transition: all 0.2s; }
+.og-ml-layout { display: grid; grid-template-columns: 1fr; gap: 1.25rem; align-items: start; }
+.og-ml-layout.has-panel { grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); }
+.og-ml-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+.og-ml-layout.has-panel .og-ml-grid { grid-template-columns: 1fr; }
+.og-ml-card { background: var(--paper-2); border: 1px dashed var(--rule); border-radius: 6px; padding: 1.2rem; transition: all 0.2s; min-width: 0; display: flex; flex-direction: column; gap: 0.9rem; }
 .og-ml-card.is-open { background: var(--paper-active); border-style: solid; border-color: var(--rule); }
-.og-ml-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
-.og-ml-card-head h3 { font-family: var(--font-display); font-size: 1.25rem; font-style: italic; color: var(--ink); }
-.og-ml-meta { font-size: 0.8rem; color: var(--ink-soft); text-transform: lowercase; }
-.og-ml-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
-.og-ml-tracks { margin-top: 1rem; border-top: 1px dashed var(--rule); padding-top: 0.5rem; max-height: 280px; overflow-y: auto; }
+.og-ml-card-top { display: flex; align-items: center; gap: 0.75rem; }
+.og-ml-card-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.og-ml-card-info h3 { font-family: var(--font-display); font-size: 1.2rem; font-style: italic; color: var(--ink); word-break: break-word; }
+.og-ml-meta { font-size: 0.78rem; color: var(--ink-soft); text-transform: lowercase; display: block; }
+.og-ml-card-play { flex-shrink: 0; border-radius: 50%; border: none; cursor: pointer; font-family: var(--font-body); font-style: normal; }
+.og-ml-card-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.og-ml-card-actions .og-btn { flex: 0 1 auto; }
+
+/* Kebab menu (three-dots) */
+.og-ml-menu-wrap { position: relative; flex-shrink: 0; }
+.og-ml-menu-btn {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: transparent; border: 1px solid transparent;
+  color: var(--ink-soft); font-size: 1.2rem; line-height: 1;
+  cursor: pointer; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-body); font-style: normal;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.og-ml-menu-btn:hover { background: var(--paper-2); color: var(--ink); border-color: var(--rule); }
+.og-ml-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  min-width: 140px; padding: 0.3rem;
+  background: var(--paper-fab); border: 1px solid var(--rule); border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(58, 50, 42, 0.18);
+  display: flex; flex-direction: column; gap: 0.1rem;
+  animation: og-menu-in 0.12s ease-out;
+}
+.og-ml-menu-right { right: 0; left: auto; }
+@keyframes og-menu-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.og-ml-menu-item {
+  background: none; border: none; cursor: pointer;
+  text-align: left; padding: 0.5rem 0.75rem; border-radius: 4px;
+  font-family: var(--font-body); font-style: normal; font-size: 0.88rem;
+  color: var(--ink); transition: background 0.15s, color 0.15s;
+}
+.og-ml-menu-item:hover { background: var(--paper-2); }
+.og-ml-menu-danger { color: var(--accent); }
+.og-ml-menu-danger:hover { background: var(--accent-soft); }
+
+.og-ml-rename-input {
+  width: 100%; background: var(--paper); border: 1px dashed var(--rule); border-radius: 4px;
+  padding: 0.4rem 0.6rem; font-family: var(--font-display); font-style: italic; font-size: 1.05rem; color: var(--ink); outline: none;
+}
+.og-ml-rename-input:focus { border-color: var(--accent); border-style: solid; }
+.og-mld-rename-input { font-size: 1.6rem; color: var(--accent); padding: 0.5rem 0.7rem; }
+.og-modal-danger { background: var(--accent) !important; }
+.og-ml-card-view { align-self: flex-start; }
+/* legacy actions container — keep simple if anything still uses it */
+.og-ml-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.og-ml-panel { background: var(--paper-active); border: 1px solid var(--rule); border-radius: 6px; padding: 1.2rem; position: sticky; top: 1rem; max-height: calc(100vh - 140px); display: flex; flex-direction: column; }
+.og-ml-panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px dashed var(--rule); margin-bottom: 0.75rem; }
+.og-ml-panel-head h3 { font-family: var(--font-display); font-size: 1.15rem; font-style: italic; color: var(--ink); }
+.og-ml-panel-loading { color: var(--ink-soft); padding: 1rem 0; }
+.og-ml-panel-tracklist { overflow-y: auto; flex: 1; min-height: 0; padding-right: 4px; }
+.og-ml-panel-tracklist::-webkit-scrollbar { width: 4px; }
+.og-ml-panel-tracklist::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 2px; }
+.og-ml-panel-tracks { overflow-y: auto; flex: 1; min-height: 0; padding-right: 4px; }
 .og-ml-track { display: grid; grid-template-columns: 30px 2fr 1.4fr; gap: 0.8rem; padding: 0.55rem 0; width: 100%; background: transparent; border: none; border-bottom: 1px dashed var(--rule); cursor: pointer; text-align: left; font-family: inherit; color: var(--ink); }
 .og-ml-track:hover { color: var(--accent); }
 .og-ml-track span:first-child { font-family: var(--font-mono); font-size: 0.78rem; color: var(--ink-faint); }
@@ -884,14 +1009,28 @@ html, body { width: 100%; height: 100%; -webkit-text-size-adjust: 100%; }
 
   /* My Playlists */
   .og-ml-head h1 { font-size: 2rem; }
-  .og-ml-grid { grid-template-columns: 1fr; }
-  .og-ml-card-head { flex-direction: column; align-items: flex-start; }
+  .og-ml-layout, .og-ml-layout.has-panel { grid-template-columns: 1fr; }
+  .og-ml-grid, .og-ml-layout.has-panel .og-ml-grid { grid-template-columns: 1fr; }
+  .og-ml-card-top { flex-direction: row; align-items: center; }
   .og-ml-actions { width: 100%; }
   .og-ml-actions .og-btn { flex: 1; justify-content: center; }
+  .og-ml-panel { position: static; max-height: none; }
+  .og-mld-header { flex-wrap: nowrap; }
+  .og-mld-header-text h1 { font-size: 1.5rem; }
+
+  /* Detail view collapses to a stack */
+  .og-mylists.og-mylists-detail { height: auto; }
+  .og-mld-layout { grid-template-columns: 1fr; height: auto; }
+  .og-mld-sidebar { border-right: none; border-bottom: 1px dashed var(--rule); max-height: 50vh; }
+  .og-mld-list { padding-bottom: 1rem; }
+  .og-mld-header { padding: 1.25rem 1rem 1rem; }
+  .og-mld-header-text h1 { font-size: 1.75rem; }
+  .og-mld-tracks { padding: 0.75rem 0.5rem 140px; }
 
   /* Modals */
   .og-modal { width: min(420px, 92vw); padding: 1.5rem 1.25rem; }
   .og-modal-actions { flex-direction: column-reverse; gap: 0.5rem; }
+  .og-modal-actions.og-modal-actions-stack { flex-direction: column; }
   .og-modal-actions .og-btn { width: 100%; justify-content: center; }
 
   /* Toast — keep above the player on phone (player is taller now) */
@@ -901,6 +1040,7 @@ html, body { width: 100%; height: 100%; -webkit-text-size-adjust: 100%; }
 /* Devices with no hover (almost all touch): keep action affordances visible. */
 @media (hover: none) {
   .og-tr-add { opacity: 1; }
+  .og-tr-remove { opacity: 1; }
 }
 
 /* Make taps responsive everywhere, prevent iOS auto-zoom on focus */
