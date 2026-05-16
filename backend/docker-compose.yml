@@ -10,6 +10,8 @@ services:
       - -c
       - |
         set -e
+        echo "Generating migrations..."
+        python manage.py makemigrations --noinput
         echo "Running database migrations..."
         python manage.py migrate --noinput
         echo "Checking whether full-DB bootstrap is needed..."
