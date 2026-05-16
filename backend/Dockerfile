@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libsndfile1 dos2unix \
+    && apt-get install -y --no-install-recommends build-essential libsndfile1 dos2unix ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

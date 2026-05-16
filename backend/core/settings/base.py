@@ -94,6 +94,8 @@ default_db_engine = env("DB_ENGINE", "django.db.backends.sqlite3")
 default_db_name = str(BASE_DIR / "db.sqlite3")
 if "postgresql" in default_db_engine:
     default_db_name = env("POSTGRES_DB", "postgres")
+elif "cockroach" in default_db_engine:
+    default_db_name = env("POSTGRES_DB", "defaultdb")
 
 DATABASES = {
     "default": {
@@ -103,6 +105,12 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD", env("POSTGRES_PASSWORD", "")),
         "HOST": env("DB_HOST", "localhost"),
         "PORT": env("DB_PORT", "5432"),
+        "OPTIONS": {
+            "sslmode": env("DB_SSL_MODE", "prefer"),
+            **({
+                "sslrootcert": env("DB_SSL_ROOT_CERT")
+            } if env("DB_SSL_ROOT_CERT") else {}),
+        },
     }
 }
 
