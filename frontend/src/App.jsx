@@ -1461,33 +1461,55 @@ function GroupLobby({ group: initialGroup, role, participantId, onTakeSurvey, on
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
 
-  // Poll the lobby state every 2.5s while waiting.
+  // Live lobby updates over a WebSocket (Django Channels). The backend pushes
+  // the full session snapshot on connect and again whenever someone joins,
+  // marks ready, or the host generates the playlist.
   useEffect(() => {
     if (group.status === 'generated') return;
     let cancelled = false;
-    const tick = async () => {
-      try {
-        const fresh = await API.fetchGroupSession(group.id);
+    let ws = null;
+    let reconnectTimer = null;
+
+    const applySnapshot = async (fresh) => {
+      if (cancelled) return;
+      if (fresh.status === 'generated' && fresh.playlistId) {
+        // Navigate BEFORE setGroup — otherwise the status-change re-render
+        // triggers this effect's cleanup (cancelled=true) mid-await, which
+        // would swallow onPlaylistReady and strand the user on the lobby.
+        const tracks = await API.fetchPlaylistTracks(fresh.playlistId);
         if (cancelled) return;
-        if (fresh.status === 'generated' && fresh.playlistId) {
-          // Navigate BEFORE setGroup — otherwise the status-change re-render
-          // triggers this effect's cleanup (cancelled=true) mid-await, which
-          // would swallow onPlaylistReady and strand the user on the lobby.
-          const tracks = await API.fetchPlaylistTracks(fresh.playlistId);
-          if (cancelled) return;
-          onPlaylistReady({
-            moodLabel: fresh.blendedMoodLabel || fresh.playlist?.moodLabel,
-            confidence: fresh.playlist?.confidence || 0,
-            tracks: tracks.map(t => ({ ...t.track, relevanceScore: t.relevanceScore })),
-            playlistId: fresh.playlistId,
-          });
-          return;
-        }
-        setGroup(fresh);
-      } catch (e) { /* poll quietly */ }
+        onPlaylistReady({
+          moodLabel: fresh.blendedMoodLabel || fresh.playlist?.moodLabel,
+          confidence: fresh.playlist?.confidence || 0,
+          tracks: tracks.map(t => ({ ...t.track, relevanceScore: t.relevanceScore })),
+          playlistId: fresh.playlistId,
+        });
+        return;
+      }
+      setGroup(fresh);
     };
-    const id = setInterval(tick, 2500);
-    return () => { cancelled = true; clearInterval(id); };
+
+    const connect = () => {
+      if (cancelled) return;
+      ws = new WebSocket(API.groupSessionSocketUrl(group.id));
+      ws.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.type === 'group.update' && msg.payload) applySnapshot(msg.payload);
+      };
+      ws.onclose = (ev) => {
+        // 4004 = server rejected an unknown group; don't retry that.
+        if (cancelled || ev.code === 4004) return;
+        reconnectTimer = setTimeout(connect, 2000);
+      };
+    };
+
+    connect();
+    return () => {
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) { ws.onclose = null; ws.close(); }
+    };
   }, [group.id, group.status]);
 
   const me = group.participants?.find(p => p.id === participantId);
