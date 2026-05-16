@@ -14,11 +14,14 @@ services:
         python manage.py migrate --noinput
         echo "Syncing mood questions..."
         python manage.py sync_mood_questions --no-color
-        echo "Checking whether track bootstrap is needed..."
+        echo "Checking whether full-DB bootstrap is needed..."
         if python manage.py shell -c "from tracks.models import Track; raise SystemExit(0 if Track.objects.exists() else 1)"; then
           echo "Tracks already exist, skipping Excel import."
+        elif [ -f /app/data/full_db_export.xlsx ]; then
+          echo "Bootstrapping entire DB from full_db_export.xlsx..."
+          python scripts/import_db_from_excel.py /app/data/full_db_export.xlsx
         else
-          echo "No tracks found, importing from Excel workbook..."
+          echo "No tracks found, importing tracks-only Excel workbook..."
           python manage.py import_from_excel /app/data/harmonic_export.xlsx --no-color
         fi
         exec python manage.py runserver 0.0.0.0:8000
