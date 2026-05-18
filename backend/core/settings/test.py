@@ -27,4 +27,6 @@ MIGRATION_MODULES = {
     "tracks": None,
     "playlists": None,
     "feedback": None,
+    "groups": None,
+    "concerts": None,
 }
