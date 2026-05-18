@@ -10,5 +10,6 @@ urlpatterns = [
     path('playlists/', include('playlists.urls')),
     path('feedback/', include('feedback.urls')),
     path('groups/', include('groups.urls')),
+    path('concerts/', include('concerts.urls')),
     path('users/', include('users.urls')),
 ]

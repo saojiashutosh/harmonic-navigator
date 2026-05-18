@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "playlists",
     "feedback",
     "groups",
+    "concerts",
     "rest_framework.authtoken",
 ]
 
@@ -144,6 +145,12 @@ STATIC_URL = "static/"
 STATIC_ROOT = env("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles"))
 
 GROQ_API_KEY = env("GROQ_API_KEY", "")
+
+# Concert Mode integrations. Both are optional — discovery needs a Ticketmaster
+# key; setlist weighting needs a setlist.fm key. Missing keys degrade
+# gracefully (see concerts/services.py) rather than crashing.
+TICKETMASTER_API_KEY = env("TICKETMASTER_API_KEY", "")
+SETLISTFM_API_KEY = env("SETLISTFM_API_KEY", "")
 
 REDIS_URL = env("REDIS_URL", "redis://127.0.0.1:6379/0")
 
