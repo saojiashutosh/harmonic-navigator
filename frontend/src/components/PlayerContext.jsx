@@ -61,6 +61,14 @@ export const PlayerProvider = ({ children }) => {
     setIsPlaying(next);
   }, []);
 
+  // Absolute play/pause setter — unlike togglePlay this forces a specific
+  // state, which the group "play along" sync needs (it mirrors the host's
+  // exact isPlaying rather than flipping a local toggle).
+  const setPlaying = useCallback((on) => {
+    if (on) safePlay(audioRef.current);
+    setIsPlaying(!!on);
+  }, []);
+
   const playNext = useCallback(() => {
     const ci = currentIndexRef.current;
     const ql = queueLengthRef.current;
@@ -130,6 +138,7 @@ export const PlayerProvider = ({ children }) => {
         setIsLoadingAudio,
         audioRef,
         togglePlay,
+        setPlaying,
         playNext,
         playPrevious,
         jumpTo,

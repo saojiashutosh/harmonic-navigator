@@ -10,6 +10,7 @@ services:
       - -c
       - |
         set -e
+
         # Migrations are a one-time manual step — the remote DB keeps its
         # schema, so we do NOT run them on every startup. When the models
         # change, run once:

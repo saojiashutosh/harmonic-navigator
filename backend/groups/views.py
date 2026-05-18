@@ -7,6 +7,7 @@ from harmonic_navigator.views import HarmonicBaseViewSet
 from moods.models import MoodSession
 
 from . import filters, models, serializers, services
+from .realtime import broadcast_group_update
 
 
 class GroupSessionViewSet(HarmonicBaseViewSet):
@@ -18,7 +19,10 @@ class GroupSessionViewSet(HarmonicBaseViewSet):
       - each participant takes the regular mood survey (moods app)
       - frontend calls POST /groups/group-sessions/{id}/attach-session/
         once a participant's MoodInference exists, flipping isReady=True
-      - host polls GET /groups/group-sessions/{id}/    to see who's ready
+      - every device holds a WebSocket open to ws/groups/{id}/ and receives
+        the live session state (who's ready, playlist generated) — see
+        groups/consumers.py. Each mutating endpoint below broadcasts the
+        fresh snapshot via realtime.broadcast_group_update.
       - host calls POST /groups/group-sessions/{id}/generate/ which blends
         the inferences, builds a shared playlist, returns it
     """
@@ -66,6 +70,8 @@ class GroupSessionViewSet(HarmonicBaseViewSet):
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        # Tell the host's lobby (and any other device) a new participant joined.
+        broadcast_group_update(session.id)
         return Response(
             {
                 "groupSession": self.get_serializer(session).data,
@@ -104,6 +110,8 @@ class GroupSessionViewSet(HarmonicBaseViewSet):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
+        # A participant just became ready — refresh every device's lobby.
+        broadcast_group_update(group.id)
         return Response(self.get_serializer(group).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="generate")
@@ -115,6 +123,8 @@ class GroupSessionViewSet(HarmonicBaseViewSet):
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         group.refresh_from_db()
+        # Playlist is ready — push it so every waiting device navigates over.
+        broadcast_group_update(group.id)
         return Response(self.get_serializer(group).data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="by-code/(?P<code>[A-Za-z0-9]+)")

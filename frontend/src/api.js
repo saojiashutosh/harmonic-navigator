@@ -282,6 +282,16 @@ export const generateGroupPlaylist = async (groupId) => {
   return data;
 };
 
+// Live group-session WebSocket (Django Channels): lobby updates plus the
+// host-driven "play along" playback sync. Same-origin so Vite's dev proxy
+// forwards it to Django; the scheme tracks the page (wss:// on HTTPS). The
+// participant id lets the backend tell whether this socket is the host.
+export const groupSessionSocketUrl = (groupId, participantId) => {
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const query = participantId ? `?participant=${encodeURIComponent(participantId)}` : '';
+  return `${scheme}://${window.location.host}/ws/groups/${groupId}/${query}`;
+};
+
 /**
  * Fetch a full-quality audio stream URL from JioSaavn.
  * Pass trackId to enable DB caching — subsequent calls for the same track

@@ -48,6 +48,8 @@ export default defineConfig({
       '/tracks':    'http://localhost:8000',
       '/feedback':  'http://localhost:8000',
       '/admin':     'http://localhost:8000',
+      // WebSocket for the live group lobby — `ws: true` upgrades the proxy.
+      '/ws':        { target: 'http://localhost:8000', ws: true },
     },
   },
   define: {
