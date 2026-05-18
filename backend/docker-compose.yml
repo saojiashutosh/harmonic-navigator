@@ -10,10 +10,12 @@ services:
       - -c
       - |
         set -e
-        echo "Generating migrations..."
-        python manage.py makemigrations --noinput
-        echo "Running database migrations..."
-        python manage.py migrate --noinput
+
+        # Migrations are a one-time manual step — the remote DB keeps its
+        # schema, so we do NOT run them on every startup. When the models
+        # change, run once:
+        #   docker compose exec web python manage.py makemigrations
+        #   docker compose exec web python manage.py migrate
         echo "Checking whether full-DB bootstrap is needed..."
         if python manage.py shell -c "from tracks.models import Track; raise SystemExit(0 if Track.objects.exists() else 1)"; then
           echo "Tracks already exist, skipping Excel import."
