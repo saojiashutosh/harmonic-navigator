@@ -5,38 +5,53 @@ from datetime import date
 
 from django.db import transaction
 
-from helpers import setlistfm_client, ticketmaster_client
+from concerts.enrichment import estimate_audio_features
+from helpers import allevents_client, saavn_client, setlistfm_client
+from helpers.saavn_client import SaavnRequestError
 from helpers.setlistfm_client import SetlistFmConfigurationError
 from playlists.models import Playlist, PlaylistTrack
 from tracks.models import Artist, Track
 
 from .constants import (
-    CONCERT_FILLER_MOODS,
     CONCERT_MOOD_LABEL,
     DEFAULT_CONCERT_PLAYLIST_SIZE,
+    MIN_ARTIST_MATCH_LENGTH,
+    ONLINE_FETCH_LIMIT,
     SETLIST_SONG_LIMIT,
 )
 from .models import ConcertEvent, ConcertPlaylist
 
-# Strip parenthetical / dash-suffix variants so "Yellow (Live)" and
-# "Yellow - Remastered" both normalise to the same base title.
-_VARIANT_RE = re.compile(
-    r"\s*[\(\[\{][^\)\]\}]*[\)\]\}]"
-    r"|\s*[-–]\s*(remaster(?:ed)?|live|acoustic|radio\s+edit|version|edit).*$",
-    re.IGNORECASE,
-)
+# Collapse song-title variants so the same song imported under slightly
+# different names dedupes to one playlist entry — parenthetical tags
+# ("(Lofi)"), dash tails ('Song - From "Movie"', "- Reprise", remasters)
+# and feat./from credits all reduce to the same base title.
+_PAREN_RE = re.compile(r"[\(\[\{][^\)\]\}]*[\)\]\}]")
+_DASH_TAIL_RE = re.compile(r"\s[-–|]\s.*$")
+_CREDIT_TAIL_RE = re.compile(r"\b(from|feat|ft|featuring)\b.*$", re.IGNORECASE)
 
 
 def _normalise_title(title: str | None) -> str:
     if not title:
         return ""
-    cleaned = _VARIANT_RE.sub("", title)
-    cleaned = re.sub(r"[^\w\s]", "", cleaned)
-    return re.sub(r"\s+", " ", cleaned).strip().lower()
+    text = _PAREN_RE.sub(" ", title)
+    text = _DASH_TAIL_RE.sub("", text)
+    text = _CREDIT_TAIL_RE.sub(" ", text)
+    text = re.sub(r"[^\w\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip().lower()
 
 
-def _normalise_artist(name: str | None) -> str:
-    return re.sub(r"[^\w]", "", (name or "").lower())
+def _normalise_phrase(value: str | None) -> str:
+    """Lowercase, drop punctuation, collapse whitespace — for phrase matching."""
+    cleaned = re.sub(r"[^\w\s]", " ", (value or "").lower())
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _event_haystack(event: dict) -> str:
+    """Searchable text for an event: its name plus any tags / attractions."""
+    parts = [event.get("name") or ""]
+    parts += event.get("attractions") or []
+    parts += event.get("tags") or []
+    return _normalise_phrase(" ".join(parts))
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -48,26 +63,56 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
-def discover_concerts(
-    city: str,
-    *,
-    country_code: str | None = None,
-) -> list[ConcertEvent]:
+def _concert_identity(event: ConcertEvent) -> tuple:
+    """Identity of a concert: same artist + venue + date is the same show.
+
+    A different date is a genuinely different show. A null date can't be
+    compared, so those events are given a unique key and never merged.
+    """
+    if event.eventDate is None:
+        return ("__unique__", event.id)
+    return (
+        event.artistId_id,
+        event.eventDate,
+        (event.venueName or "").strip().lower(),
+    )
+
+
+def dedupe_concerts(events) -> list[ConcertEvent]:
+    """Drop duplicate concert listings (same artist, venue and date)."""
+    seen: set = set()
+    unique: list[ConcertEvent] = []
+    for event in events:
+        identity = _concert_identity(event)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(event)
+    return unique
+
+
+def discover_concerts(city: str) -> list[ConcertEvent]:
     """Discover upcoming concerts in `city` for artists in the catalog.
 
-    Queries Ticketmaster once for the city, matches each event's attractions
-    against the Artist catalog, and upserts a ConcertEvent per matched
-    (artist, event) pair. Past-dated events are skipped.
+    Scrapes AllEvents once for the city, then matches each event's name,
+    tags and performers against catalog artist names (word-boundary match).
+    A ConcertEvent is upserted per matched (artist, event) pair; past-dated
+    events are skipped. Listing pages rarely expose a performer field, so
+    matching leans on the event title — which for music gigs reliably leads
+    with the headline act ("Hariharan in Mumbai", "Lucky Ali Live").
     """
-    events = ticketmaster_client.search_events(city, country_code=country_code)
+    events = allevents_client.search_events(city)
     if not events:
         return []
 
-    artist_index = {
-        _normalise_artist(artist.name): artist
-        for artist in Artist.objects.all()
-        if artist.name
-    }
+    # Skip very short artist names — they cause false-positive substring hits.
+    artist_patterns: list[tuple[Artist, re.Pattern]] = []
+    for artist in Artist.objects.all():
+        phrase = _normalise_phrase(artist.name)
+        if len(phrase) >= MIN_ARTIST_MATCH_LENGTH:
+            artist_patterns.append(
+                (artist, re.compile(rf"\b{re.escape(phrase)}\b"))
+            )
 
     discovered: list[ConcertEvent] = []
     seen: set[tuple] = set()
@@ -77,14 +122,27 @@ def discover_concerts(
         event_date = _parse_date(event.get("event_date"))
         if event_date and event_date < today:
             continue
-        for attraction in event.get("attractions") or []:
-            artist = artist_index.get(_normalise_artist(attraction))
-            if artist is None:
+        haystack = _event_haystack(event)
+        if not haystack:
+            continue
+        for artist, pattern in artist_patterns:
+            if not pattern.search(haystack):
                 continue
             key = (event.get("external_id"), artist.id)
             if key in seen:
                 continue
             seen.add(key)
+
+            # Skip a listing that duplicates a concert already stored — same
+            # artist + venue + date is the same show, even when AllEvents
+            # lists it twice under different URLs. A different date is a
+            # genuinely different show and is kept.
+            if event_date and ConcertEvent.objects.filter(
+                artistId=artist,
+                eventDate=event_date,
+                venueName=event.get("venue_name"),
+            ).exclude(externalId=event.get("external_id")).exists():
+                continue
 
             concert, _ = ConcertEvent.objects.update_or_create(
                 externalId=event.get("external_id"),
@@ -93,17 +151,98 @@ def discover_concerts(
                     "name": event.get("name"),
                     "venueName": event.get("venue_name"),
                     "city": event.get("city") or city,
-                    "country": event.get("country"),
+                    "country": event.get("country") or "India",
                     "eventDate": event_date,
                     "ticketUrl": event.get("ticket_url"),
                     "imageUrl": event.get("image_url"),
-                    "source": ConcertEvent.SourceChoices.TICKETMASTER,
+                    "source": ConcertEvent.SourceChoices.SCRAPED,
                     "isActive": True,
                 },
             )
             discovered.append(concert)
 
     return discovered
+
+
+def _ensure_artist_tracks(artist: Artist, *, minimum: int) -> None:
+    """Top up an artist's catalog from JioSaavn when too few tracks exist locally.
+
+    Concert playlists are artist-only, so a thin local catalog would yield a
+    short playlist. When fewer than `minimum` tracks are stored for the
+    artist, fetch more of their songs from JioSaavn and import them under the
+    same catalog artist. Silently no-ops when JioSaavn is unreachable, falling
+    back to whatever is stored locally.
+    """
+    existing = Track.objects.filter(artistId=artist, isActive=True).count()
+    if existing >= minimum:
+        return
+
+    artist_name = (artist.name or "").strip()
+    if not artist_name:
+        return
+
+    try:
+        songs = saavn_client.search_songs(artist_name, limit=ONLINE_FETCH_LIMIT)
+    except SaavnRequestError:
+        return
+
+    target = _normalise_phrase(artist_name)
+    for song in songs:
+        candidate = _normalise_phrase(song.get("artist"))
+        # JioSaavn search is fuzzy — only import songs actually by this artist.
+        if not candidate or (
+            candidate != target
+            and target not in candidate
+            and candidate not in target
+        ):
+            continue
+        _import_saavn_track(song, artist)
+
+
+def _import_saavn_track(song: dict, artist: Artist) -> None:
+    """Create a Track for a JioSaavn song under the given catalog artist.
+
+    Deduped by (artist, title) so repeated top-ups don't pile up rows. The
+    track is enriched with heuristic audio features (energy, valence, mood,
+    genre, region) so it participates in survey-based recommendation
+    playlists — not just concert-only playlists.
+    """
+    title = song.get("title")
+    if not title:
+        return
+    if Track.objects.filter(artistId=artist, title__iexact=title).exists():
+        return
+
+    # Estimate audio features from JioSaavn metadata so the track is
+    # recommendation-ready for the survey pipeline.
+    estimated = estimate_audio_features(
+        title=title,
+        language=song.get("language"),
+        duration_ms=song.get("duration_ms"),
+        artist_name=artist.name,
+    )
+
+    Track.objects.create(
+        title=title,
+        artistId=artist,
+        type=Track.TypeChoices.SONG,
+        source=Track.SourceChoices.MANUAL,
+        language=song.get("language"),
+        releaseYear=song.get("year"),
+        durationMs=song.get("duration_ms"),
+        isExplicit=song.get("is_explicit", False),
+        isActive=True,
+        # Heuristic audio features for recommendation scoring
+        energy=estimated.get("energy"),
+        valence=estimated.get("valence"),
+        acousticness=estimated.get("acousticness"),
+        instrumentalness=estimated.get("instrumentalness"),
+        loudness=estimated.get("loudness"),
+        primaryMood=estimated.get("primaryMood"),
+        genre=estimated.get("genre"),
+        region=estimated.get("region"),
+        tempoBpm=estimated.get("tempoBpm"),
+    )
 
 
 def ensure_setlist(event: ConcertEvent, *, refresh: bool = False) -> list[dict]:
@@ -135,9 +274,12 @@ def build_concert_playlist(
 ) -> ConcertPlaylist:
     """Generate a "get ready for the concert" playlist for an event.
 
-    Tracks are weighted toward the artist's recent setlist songs, then their
-    remaining catalog, then high-energy filler tracks so the playlist still
-    reaches `limit` when the artist's catalog is thin.
+    The playlist is built strictly from the concert artist's own songs —
+    recent-setlist songs first (weighted by how often they're played live),
+    then the rest of their tracks. No cross-artist filler: a Lucky Ali
+    concert playlist contains only Lucky Ali songs. When the local catalog
+    is too thin to fill the set, more of the artist's songs are fetched
+    from JioSaavn first.
     """
     setlist = ensure_setlist(event)
     setlist_weights = {
@@ -147,18 +289,17 @@ def build_concert_playlist(
     }
     max_count = max(setlist_weights.values(), default=1)
 
+    # When the local catalog is too thin to fill the set, fetch more of the
+    # artist's songs from JioSaavn before scoring.
+    _ensure_artist_tracks(event.artistId, minimum=limit)
+
     artist_tracks = Track.objects.select_related("artistId").filter(
         artistId=event.artistId, isActive=True,
     )
 
-    scored: list[tuple[Track, float, str]] = []
-    seen_titles: set[str] = set()
+    scored: list[tuple[Track, str, float, str]] = []
     for track in artist_tracks:
         base = _normalise_title(track.title)
-        if base and base in seen_titles:
-            continue
-        seen_titles.add(base)
-
         weight = setlist_weights.get(base)
         if weight is not None:
             # Setlist match — scaled by how often the song appears in recent
@@ -168,24 +309,20 @@ def build_concert_playlist(
         else:
             score = 1.0
             reason = PlaylistTrack.SelectionReason.MOOD_MATCH
-        scored.append((track, score, reason))
+        scored.append((track, base, score, reason))
 
-    scored.sort(key=lambda item: item[1], reverse=True)
-
-    # Fill remaining slots with high-energy tracks so the playlist hits `limit`
-    # even for artists with a sparse catalog — live prep should feel full.
-    if len(scored) < limit:
-        existing_ids = {track.id for track, _, _ in scored}
-        fillers = (
-            Track.objects.select_related("artistId")
-            .filter(isActive=True, primaryMood__in=CONCERT_FILLER_MOODS)
-            .exclude(id__in=existing_ids)
-            .order_by("-artistPopularity")[: limit - len(scored)]
-        )
-        for track in fillers:
-            scored.append((track, 0.5, PlaylistTrack.SelectionReason.FALLBACK))
-
-    chosen = scored[:limit]
+    # Highest-scored first, then drop duplicate songs — keeping the best-ranked
+    # copy of each (so a setlist-matched variant beats a plain re-import).
+    scored.sort(key=lambda item: item[2], reverse=True)
+    chosen: list[tuple[Track, float, str]] = []
+    seen_titles: set[str] = set()
+    for track, base, score, reason in scored:
+        if base in seen_titles:
+            continue
+        seen_titles.add(base)
+        chosen.append((track, score, reason))
+        if len(chosen) >= limit:
+            break
     owner = user if (user is not None and user.is_authenticated) else None
 
     with transaction.atomic():

@@ -9,7 +9,7 @@ class ConcertEvent(HarmonicBaseModel):
     """An upcoming live concert discovered for an artist in the catalog."""
 
     class SourceChoices(models.TextChoices):
-        TICKETMASTER = "ticketmaster", "Ticketmaster"
+        SCRAPED = "scraped", "Scraped"
         MANUAL = "manual", "Manual"
 
     artistId = models.ForeignKey(
@@ -82,7 +82,7 @@ class ConcertEvent(HarmonicBaseModel):
         verbose_name=_("source"),
         db_column="source",
         choices=SourceChoices.choices,
-        default=SourceChoices.TICKETMASTER,
+        default=SourceChoices.SCRAPED,
     )
     isActive = models.BooleanField(
         verbose_name=_("isActive"),

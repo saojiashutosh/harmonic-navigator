@@ -52,9 +52,6 @@ class ConcertPlaylistSerializer(HarmonicBaseSerializer):
 
 class DiscoverConcertsSerializer(serializers.Serializer):
     city = serializers.CharField(max_length=128)
-    countryCode = serializers.CharField(
-        max_length=4, required=False, allow_blank=True,
-    )
 
 
 class GenerateConcertPlaylistSerializer(serializers.Serializer):
