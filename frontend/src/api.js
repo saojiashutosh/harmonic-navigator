@@ -282,12 +282,14 @@ export const generateGroupPlaylist = async (groupId) => {
   return data;
 };
 
-// Live group-lobby updates over a WebSocket (Django Channels), replacing the
-// old polling. Same-origin so Vite's dev proxy forwards it to Django; the
-// scheme tracks the page (wss:// when served over HTTPS).
-export const groupSessionSocketUrl = (groupId) => {
+// Live group-session WebSocket (Django Channels): lobby updates plus the
+// host-driven "play along" playback sync. Same-origin so Vite's dev proxy
+// forwards it to Django; the scheme tracks the page (wss:// on HTTPS). The
+// participant id lets the backend tell whether this socket is the host.
+export const groupSessionSocketUrl = (groupId, participantId) => {
   const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${scheme}://${window.location.host}/ws/groups/${groupId}/`;
+  const query = participantId ? `?participant=${encodeURIComponent(participantId)}` : '';
+  return `${scheme}://${window.location.host}/ws/groups/${groupId}/${query}`;
 };
 
 /**
