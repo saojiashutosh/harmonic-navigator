@@ -121,8 +121,12 @@ class ConcertPlaylistTests(TestCase):
             city="Mumbai",
             eventDate="2099-01-20",
         )
-        self.hit = Track.objects.create(title="Tum Hi Ho", artistId=self.artist)
-        self.deep_cut = Track.objects.create(title="Phir Le Aaya Dil", artistId=self.artist)
+        self.hit = Track.objects.create(
+            title="Tum Hi Ho", artistId=self.artist, language="hindi",
+        )
+        self.deep_cut = Track.objects.create(
+            title="Phir Le Aaya Dil", artistId=self.artist, language="hindi",
+        )
         # JioSaavn top-up is stubbed off by default; tests opt in by setting
         # a return value — keeps the rest from making real network calls.
         saavn_patcher = patch(
@@ -163,6 +167,7 @@ class ConcertPlaylistTests(TestCase):
         # The same song re-imported under a "From ..." variant title.
         Track.objects.create(
             title='Tum Hi Ho - From "Aashiqui 2"', artistId=self.artist,
+            language="hindi",
         )
 
         concert_playlist = build_concert_playlist(self.event, limit=25)
@@ -215,6 +220,40 @@ class ConcertPlaylistTests(TestCase):
             .values_list("trackId__artistId", flat=True)
         )
         self.assertEqual(artist_ids, {self.artist.id})
+
+    @patch("concerts.services.setlistfm_client.recent_setlists")
+    def test_playlist_excludes_devotional_and_non_bollywood_marathi(self, mock_setlist):
+        mock_setlist.return_value = []
+        # Devotional song by the concert artist — must be kept out.
+        Track.objects.create(
+            title="Hanuman Chalisa", artistId=self.artist, language="hindi",
+        )
+        # A devotional track flagged via genre rather than title.
+        Track.objects.create(
+            title="Evening Raag", artistId=self.artist,
+            language="hindi", genre="bhajan",
+        )
+        # An English-language track — outside Bollywood/Marathi scope.
+        Track.objects.create(
+            title="Midnight Drive", artistId=self.artist, language="english",
+        )
+        # A Marathi track — eligible, must be included.
+        marathi = Track.objects.create(
+            title="Apsara Aali", artistId=self.artist, language="marathi",
+        )
+
+        concert_playlist = build_concert_playlist(self.event, limit=25)
+
+        titles = set(
+            PlaylistTrack.objects
+            .filter(playlistId=concert_playlist.playlistId)
+            .values_list("trackId__title", flat=True)
+        )
+        # Two Hindi setUp hits + the Marathi track survive the filter.
+        self.assertEqual(
+            titles, {"Tum Hi Ho", "Phir Le Aaya Dil", "Apsara Aali"},
+        )
+        self.assertIn(marathi.title, titles)
 
 
 class ConcertScraperTests(TestCase):

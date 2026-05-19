@@ -4,6 +4,7 @@ import re
 from datetime import date
 
 from django.db import transaction
+from django.db.models import Q
 
 from concerts.enrichment import estimate_audio_features
 from helpers import allevents_client, saavn_client, setlistfm_client
@@ -13,8 +14,10 @@ from playlists.models import Playlist, PlaylistTrack
 from tracks.models import Artist, Track
 
 from .constants import (
+    CONCERT_LANGUAGES,
     CONCERT_MOOD_LABEL,
     DEFAULT_CONCERT_PLAYLIST_SIZE,
+    DEVOTIONAL_KEYWORDS,
     MIN_ARTIST_MATCH_LENGTH,
     ONLINE_FETCH_LIMIT,
     SETLIST_SONG_LIMIT,
@@ -164,16 +167,47 @@ def discover_concerts(city: str) -> list[ConcertEvent]:
     return discovered
 
 
+def _is_devotional(*texts: str | None) -> bool:
+    """True when any devotional keyword appears in the supplied text fragments."""
+    haystack = " ".join(text.lower() for text in texts if text)
+    return any(keyword in haystack for keyword in DEVOTIONAL_KEYWORDS)
+
+
+def _eligible_artist_tracks(artist: Artist):
+    """Return an artist's concert-eligible tracks.
+
+    Concert playlists recommend Bollywood (Hindi) and Marathi songs only:
+    a track qualifies when its language is Hindi/Marathi or its genre names
+    one of those (covers "bollywood"). Devotional / spiritual songs — matched
+    by keyword in the title or genre — are excluded.
+    """
+    language_match = Q(language__in=CONCERT_LANGUAGES)
+    for term in (*CONCERT_LANGUAGES, "bollywood"):
+        language_match |= Q(genre__icontains=term)
+
+    devotional = Q()
+    for keyword in DEVOTIONAL_KEYWORDS:
+        devotional |= Q(title__icontains=keyword) | Q(genre__icontains=keyword)
+
+    return (
+        Track.objects.select_related("artistId")
+        .filter(artistId=artist, isActive=True)
+        .filter(language_match)
+        .exclude(devotional)
+    )
+
+
 def _ensure_artist_tracks(artist: Artist, *, minimum: int) -> None:
     """Top up an artist's catalog from JioSaavn when too few tracks exist locally.
 
     Concert playlists are artist-only, so a thin local catalog would yield a
-    short playlist. When fewer than `minimum` tracks are stored for the
-    artist, fetch more of their songs from JioSaavn and import them under the
-    same catalog artist. Silently no-ops when JioSaavn is unreachable, falling
-    back to whatever is stored locally.
+    short playlist. When fewer than `minimum` concert-eligible tracks (Bollywood
+    / Marathi, non-devotional) are stored for the artist, fetch more of their
+    songs from JioSaavn and import them under the same catalog artist. Songs
+    that aren't Hindi/Marathi, or that look devotional, are skipped. Silently
+    no-ops when JioSaavn is unreachable, falling back to what is stored locally.
     """
-    existing = Track.objects.filter(artistId=artist, isActive=True).count()
+    existing = _eligible_artist_tracks(artist).count()
     if existing >= minimum:
         return
 
@@ -195,6 +229,12 @@ def _ensure_artist_tracks(artist: Artist, *, minimum: int) -> None:
             and target not in candidate
             and candidate not in target
         ):
+            continue
+        # Bollywood (Hindi) and Marathi only — skip other languages.
+        if (song.get("language") or "").lower() not in CONCERT_LANGUAGES:
+            continue
+        # Keep devotional / spiritual songs out of concert playlists.
+        if _is_devotional(song.get("title")):
             continue
         _import_saavn_track(song, artist)
 
@@ -277,9 +317,10 @@ def build_concert_playlist(
     The playlist is built strictly from the concert artist's own songs —
     recent-setlist songs first (weighted by how often they're played live),
     then the rest of their tracks. No cross-artist filler: a Lucky Ali
-    concert playlist contains only Lucky Ali songs. When the local catalog
-    is too thin to fill the set, more of the artist's songs are fetched
-    from JioSaavn first.
+    concert playlist contains only Lucky Ali songs. Only Bollywood (Hindi)
+    and Marathi songs are recommended, and devotional songs are excluded.
+    When the local catalog is too thin to fill the set, more of the
+    artist's songs are fetched from JioSaavn first.
     """
     setlist = ensure_setlist(event)
     setlist_weights = {
@@ -293,9 +334,7 @@ def build_concert_playlist(
     # artist's songs from JioSaavn before scoring.
     _ensure_artist_tracks(event.artistId, minimum=limit)
 
-    artist_tracks = Track.objects.select_related("artistId").filter(
-        artistId=event.artistId, isActive=True,
-    )
+    artist_tracks = _eligible_artist_tracks(event.artistId)
 
     scored: list[tuple[Track, str, float, str]] = []
     for track in artist_tracks:
