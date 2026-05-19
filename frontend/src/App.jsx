@@ -3,6 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import './index.css';
 import { PlayerProvider, usePlayer } from './components/PlayerContext';
 import MusicPlayer from './components/MusicPlayer';
+import ConcertMode from './components/ConcertMode';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import AuthModal from './components/AuthModal';
 import * as API from './api';
@@ -286,7 +287,7 @@ function PaperBackdrop() {
 }
 
 /* ── Header ──────────────────────────────────────────────── */
-function Header({ onHome, onMyPlaylists, onLogout, view }) {
+function Header({ onHome, onMyPlaylists, onConcertMode, onLogout, view }) {
   const { user, openAuth } = useAuth();
 
   return (
@@ -296,6 +297,12 @@ function Header({ onHome, onMyPlaylists, onLogout, view }) {
         <span>Harmonic Navigator</span>
       </button>
       <div className="og-header-auth">
+        <button
+          className={`og-btn og-btn-ghost og-btn-sm ${view === 'concert' ? 'is-active' : ''}`}
+          onClick={onConcertMode}
+        >
+          concert mode
+        </button>
         {user ? (
           <>
             <button
@@ -458,7 +465,7 @@ function HeroPreviewCard() {
 }
 
 /* ── Landing ─────────────────────────────────────────────── */
-function Landing({ onStart, onStartGroup, onJoinGroup }) {
+function Landing({ onStart, onStartGroup, onJoinGroup, onConcertMode }) {
   return (
     <div className="og-landing">
       <div className="og-hero">
@@ -480,6 +487,7 @@ function Landing({ onStart, onStartGroup, onJoinGroup }) {
           <div className="og-hero-group">
             <button className="og-btn og-btn-ghost" onClick={onStartGroup}>listen together ◌</button>
             <button className="og-btn og-btn-ghost og-btn-sm" onClick={onJoinGroup}>have a code?</button>
+            <button className="og-btn og-btn-ghost og-btn-sm" onClick={onConcertMode}>concert mode ♪</button>
           </div>
         </div>
         <HeroPreviewCard />
@@ -1941,6 +1949,7 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
         view={view}
         onHome={() => { setView('home'); setResults(null); }}
         onMyPlaylists={() => setView('mylists')}
+        onConcertMode={() => setView('concert')}
         onLogout={handleLogout}
       />
       <main className={`og-main view-${view}`}>
@@ -1949,6 +1958,7 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
             onStart={handleStartSession}
             onStartGroup={() => setShowCreateGroup(true)}
             onJoinGroup={() => setShowJoinGroup(true)}
+            onConcertMode={() => setView('concert')}
           />
         )}
         {view === 'mood' && (
@@ -1966,6 +1976,7 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
           />
         )}
         {view === 'mylists' && <MyPlaylists onBack={() => setView('home')} />}
+        {view === 'concert' && <ConcertMode onBack={() => setView('home')} />}
         {view === 'group-lobby' && groupCtx && (
           <GroupLobby
             group={groupCtx.initial}

@@ -1,0 +1,336 @@
+/* ── Concert Mode ─────────────────────────────────────────────
+   Paper-toned, editorial. Inherits palette vars from index.css so
+   it tracks whatever theme the shell is wearing. */
+
+.cm {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 48px 24px 96px;
+  animation: cm-rise 0.5s ease both;
+}
+
+@keyframes cm-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Intro / search ── */
+.cm-intro {
+  position: relative;
+  max-width: 640px;
+}
+
+.cm-back {
+  margin-bottom: 20px;
+}
+
+.cm-intro h1 {
+  font-family: var(--font-display);
+  font-weight: var(--display-weight, 300);
+  letter-spacing: var(--display-tracking, -0.02em);
+  font-size: clamp(2.4rem, 6vw, 4rem);
+  line-height: 1.04;
+  margin: 10px 0 16px;
+  color: var(--ink);
+}
+
+.cm-intro h1 em {
+  font-style: italic;
+  color: var(--accent);
+}
+
+.cm-intro p {
+  font-family: var(--font-body);
+  color: var(--ink-soft);
+  font-size: 1.02rem;
+  line-height: 1.6;
+  max-width: 52ch;
+}
+
+.cm-search {
+  display: flex;
+  gap: 10px;
+  margin-top: 26px;
+  flex-wrap: wrap;
+}
+
+.cm-search-field {
+  position: relative;
+  flex: 1 1 280px;
+}
+
+.cm-search-input {
+  width: 100%;
+  padding: 13px 16px;
+  font-family: var(--font-body);
+  font-size: 0.98rem;
+  color: var(--ink);
+  background: var(--paper-active);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.cm-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.cm-search-input::placeholder { color: var(--ink-faint); }
+
+/* ── City type-ahead suggestions ── */
+.cm-suggest {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--paper-fab);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: 0 16px 36px -18px rgba(58, 50, 42, 0.5);
+  animation: cm-rise 0.16s ease both;
+}
+
+.cm-suggest li { margin: 0; }
+
+.cm-suggest-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  color: var(--ink);
+  transition: background 0.14s ease;
+}
+
+.cm-suggest-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cm-suggest-pin {
+  font-size: 0.7rem;
+  color: var(--accent);
+}
+
+.cm-error {
+  margin-top: 18px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+
+/* ── Results ── */
+.cm-results {
+  margin-top: 44px;
+}
+
+.cm-results-count,
+.cm-empty {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.cm-empty {
+  display: block;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  max-width: 48ch;
+}
+
+.cm-note {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  background: var(--paper-3);
+  border-radius: 8px;
+  padding: 9px 13px;
+  margin-bottom: 16px;
+}
+
+.cm-grid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+/* ── Concert card ── */
+.cm-card {
+  position: relative;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.cm-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 30px -16px rgba(58, 50, 42, 0.4);
+}
+
+.cm-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cm-card-artist {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  color: var(--ink);
+  line-height: 1.15;
+}
+
+.cm-card-date {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.cm-card-event {
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+}
+
+.cm-card-venue {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--ink-faint);
+  margin-bottom: 6px;
+}
+
+.cm-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+/* ── Generated playlist panel ── */
+.cm-playlist {
+  margin-top: 56px;
+  border-top: 1px solid var(--rule);
+  padding-top: 36px;
+  animation: cm-rise 0.45s ease both;
+}
+
+.cm-playlist-head h2 {
+  font-family: var(--font-display);
+  font-weight: var(--display-weight, 300);
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  color: var(--ink);
+  margin: 8px 0 6px;
+}
+
+.cm-playlist-head p {
+  font-family: var(--font-body);
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+  margin-bottom: 16px;
+}
+
+.cm-tracklist {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+}
+
+.cm-track {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.16s ease;
+}
+
+.cm-track:hover { background: var(--paper-active); }
+
+.cm-track-n {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+  width: 24px;
+  flex-shrink: 0;
+}
+
+.cm-track-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cm-track-title {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 0.95rem;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-track-artist {
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+
+.cm-track-tag {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+
+.cm-track-dur {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  color: var(--ink-faint);
+  flex-shrink: 0;
+}
+
+@media (max-width: 560px) {
+  .cm { padding: 32px 16px 96px; }
+  .cm-search-field { flex-basis: 100%; }
+}

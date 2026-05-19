@@ -229,6 +229,39 @@ export const deleteSavedPlaylist = async (savedPlaylistId) => {
   }
 };
 
+// ── Concert Mode ──────────────────────────────────────────────────────────────
+
+/**
+ * Discover upcoming concerts in a city for artists in the catalog.
+ * POST /concerts/events/discover/  → { city, count, events: [...], apiError }
+ */
+export const discoverConcerts = async (city) => {
+  const res = await fetch(`${BASE_URL}/concerts/events/discover/`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ city }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Failed to discover concerts: ${res.status}`);
+  return data;
+};
+
+/**
+ * Generate a setlist-weighted "get ready for the concert" playlist.
+ * POST /concerts/events/{id}/generate-playlist/
+ * Returns a ConcertPlaylist with nested `playlist` and `concertEvent`.
+ */
+export const generateConcertPlaylist = async (eventId, limit = 25) => {
+  const res = await fetch(`${BASE_URL}/concerts/events/${eventId}/generate-playlist/`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ limit }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Failed to build concert playlist: ${res.status}`);
+  return data;
+};
+
 // ── Group Sessions ────────────────────────────────────────────────────────────
 
 export const createGroupSession = async (displayName) => {
