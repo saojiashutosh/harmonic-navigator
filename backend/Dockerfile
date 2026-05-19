@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libsndfile1 dos2unix \
+    && apt-get install -y --no-install-recommends build-essential libsndfile1 dos2unix ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -17,4 +17,5 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000"]
+# Serve over ASGI (Daphne) so HTTP and WebSocket traffic share one process.
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "core.asgi:application"]

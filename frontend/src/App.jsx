@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import './index.css';
 import { PlayerProvider, usePlayer } from './components/PlayerContext';
 import MusicPlayer from './components/MusicPlayer';
+import ConcertMode from './components/ConcertMode';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import AuthModal from './components/AuthModal';
 import * as API from './api';
@@ -286,7 +287,7 @@ function PaperBackdrop() {
 }
 
 /* ── Header ──────────────────────────────────────────────── */
-function Header({ onHome, onMyPlaylists, onLogout, view }) {
+function Header({ onHome, onMyPlaylists, onConcertMode, onLogout, view }) {
   const { user, openAuth } = useAuth();
 
   return (
@@ -296,6 +297,12 @@ function Header({ onHome, onMyPlaylists, onLogout, view }) {
         <span>Harmonic Navigator</span>
       </button>
       <div className="og-header-auth">
+        <button
+          className={`og-btn og-btn-ghost og-btn-sm ${view === 'concert' ? 'is-active' : ''}`}
+          onClick={onConcertMode}
+        >
+          concert mode
+        </button>
         {user ? (
           <>
             <button
@@ -458,7 +465,7 @@ function HeroPreviewCard() {
 }
 
 /* ── Landing ─────────────────────────────────────────────── */
-function Landing({ onStart, onStartGroup, onJoinGroup }) {
+function Landing({ onStart, onStartGroup, onJoinGroup, onConcertMode }) {
   return (
     <div className="og-landing">
       <div className="og-hero">
@@ -480,6 +487,7 @@ function Landing({ onStart, onStartGroup, onJoinGroup }) {
           <div className="og-hero-group">
             <button className="og-btn og-btn-ghost" onClick={onStartGroup}>listen together ◌</button>
             <button className="og-btn og-btn-ghost og-btn-sm" onClick={onJoinGroup}>have a code?</button>
+            <button className="og-btn og-btn-ghost og-btn-sm" onClick={onConcertMode}>concert mode ♪</button>
           </div>
         </div>
         <HeroPreviewCard />
@@ -797,7 +805,148 @@ function MoodSigil({ mood, drawIn = true, size }) {
 }
 
 /* ── Results ────────────────────────────────────────────── */
-function Results({ results, onRestart }) {
+/* ── Group "play along" sync ───────────────────────────────
+ * On the results screen of a group session every device keeps a WebSocket
+ * open. The host is the DJ: their player state is streamed to the backend
+ * and fanned out to the group. Devices in "play along" mode mirror it;
+ * "solo" devices ignore it and play independently. Toggle is per-person.
+ */
+function useGroupPlayAlong(groupCtx, tracks, moodLabel) {
+  const player = usePlayer();
+  const isHost = groupCtx?.role === 'host';
+  // Everyone starts synced — the point of a group session is shared
+  // listening. Either side can break off into "solo" at any time.
+  const [mode, setMode] = useState('along');
+
+  // Latest-value refs so the WebSocket handlers (stable, dep-free) never
+  // read stale state. Assigned on every render — idempotent, so it's safe.
+  const wsRef = useRef(null);
+  const playerRef = useRef(player);
+  const tracksRef = useRef(tracks);
+  const moodRef = useRef(moodLabel);
+  const modeRef = useRef(mode);
+  const isHostRef = useRef(isHost);
+  playerRef.current = player;
+  tracksRef.current = tracks;
+  moodRef.current = moodLabel;
+  modeRef.current = mode;
+  isHostRef.current = isHost;
+
+  // Guest: snap the local player onto the host's broadcast state.
+  const applyRemoteState = useCallback((state) => {
+    if (isHostRef.current) return;            // the host *is* the source
+    if (modeRef.current !== 'along') return;  // this listener went solo
+    const p = playerRef.current;
+    const tk = tracksRef.current;
+    if (!tk || tk.length === 0) return;
+    if (!state.active) return;                // host isn't DJ-ing — stay put
+
+    const idx = Math.max(0, Math.min(state.trackIndex | 0, tk.length - 1));
+    const onGroupQueue = p.queue.length > 0 && p.queue[0]?.id === tk[0]?.id;
+    if (!onGroupQueue) {
+      // First sync — load the blended playlist. The toggle/play click that
+      // got us here counts as the user gesture that unlocks audio.
+      p.loadPlaylist(tk, idx, moodRef.current, '#C26F3C');
+    } else if (p.currentIndex !== idx) {
+      p.jumpTo(idx);
+    }
+    // Mirror the host's exact play/pause (absolute, not a toggle — the
+    // loads above optimistically start playback, so force the real value).
+    p.setPlaying(state.isPlaying);
+
+    // Re-seek only on audible drift, so playback doesn't stutter on every
+    // heartbeat. Until metadata loads, duration is 0 and we let it ride.
+    if (p.duration > 0 && typeof p.seekTo === 'function') {
+      const localPos = p.progress * p.duration;
+      if (Math.abs(localPos - state.positionSeconds) > 2) {
+        p.seekTo(Math.min(1, Math.max(0, state.positionSeconds / p.duration)));
+      }
+    }
+  }, []);
+
+  // Host: push the current player state to the group.
+  const sendControl = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !isHostRef.current) return;
+    const p = playerRef.current;
+    const tk = tracksRef.current;
+    const onGroupQueue = p.queue.length > 0 && tk.length > 0 && p.queue[0]?.id === tk[0]?.id;
+    ws.send(JSON.stringify({
+      type: 'playback_control',
+      payload: {
+        trackIndex: onGroupQueue ? p.currentIndex : 0,
+        isPlaying: !!p.isPlaying,
+        positionSeconds: p.duration > 0 ? p.progress * p.duration : 0,
+        // Only actually DJ once we're on the blended playlist and switched on.
+        active: modeRef.current === 'along' && onGroupQueue,
+      },
+    }));
+  }, []);
+
+  // Mode switch with side effects: a guest turning sync back on asks the
+  // backend for the current state so they snap in without waiting ~3s.
+  const changeMode = useCallback((next) => {
+    setMode(next);
+    if (!isHostRef.current && next === 'along') {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: 'request_playback_state' })); } catch (_) {}
+      }
+    }
+  }, []);
+
+  // One WebSocket for the whole results screen.
+  useEffect(() => {
+    if (!groupCtx) return;
+    let cancelled = false;
+    let ws = null;
+    let reconnectTimer = null;
+    const connect = () => {
+      if (cancelled) return;
+      ws = new WebSocket(API.groupSessionSocketUrl(groupCtx.id, groupCtx.participantId));
+      wsRef.current = ws;
+      ws.onopen = () => {
+        if (cancelled) return;
+        if (isHostRef.current) sendControl();
+        else if (modeRef.current === 'along') {
+          try { ws.send(JSON.stringify({ type: 'request_playback_state' })); } catch (_) {}
+        }
+      };
+      ws.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch (_) { return; }
+        if (msg.type === 'playback.state' && msg.payload) applyRemoteState(msg.payload);
+      };
+      ws.onclose = (ev) => {
+        if (wsRef.current === ws) wsRef.current = null;
+        if (cancelled || ev.code === 4004) return;
+        reconnectTimer = setTimeout(connect, 2000);
+      };
+    };
+    connect();
+    return () => {
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) { ws.onclose = null; ws.close(); }
+    };
+  }, [groupCtx?.id, groupCtx?.participantId, applyRemoteState, sendControl]);
+
+  // Host: broadcast immediately on every meaningful change...
+  useEffect(() => {
+    if (groupCtx && isHost) sendControl();
+  }, [groupCtx, isHost, mode, player.currentIndex, player.isPlaying, sendControl]);
+
+  // ...and a steady heartbeat so listeners correct drift and seeks land.
+  useEffect(() => {
+    if (!groupCtx || !isHost) return;
+    const id = setInterval(sendControl, 3000);
+    return () => clearInterval(id);
+  }, [groupCtx, isHost, sendControl]);
+
+  return { mode, isHost, setMode: changeMode, isGroup: !!groupCtx };
+}
+
+function Results({ results, onRestart, groupCtx }) {
   const { loadPlaylist, jumpTo, isPlaying, currentTrack, queue } = usePlayer();
   const { user, openAuth } = useAuth();
   const meta = HS.moodMeta(results?.moodLabel);
@@ -821,6 +970,9 @@ function Results({ results, onRestart }) {
   const [listsError, setListsError] = useState(null);
   const [toast, setToast] = useState(null);
 
+  // Group "play along" sync — no-ops for a solo (non-group) session.
+  const playAlong = useGroupPlayAlong(groupCtx, tracks, results?.moodLabel);
+
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2400); };
 
   const loadMyLists = async () => {
@@ -831,6 +983,10 @@ function Results({ results, onRestart }) {
   };
 
   const handlePlay = (i) => {
+    // A guest hand-picking a track is taking control — drop them out of sync.
+    if (playAlong.isGroup && !playAlong.isHost && playAlong.mode === 'along') {
+      playAlong.setMode('solo');
+    }
     if (queue.length > 0 && tracks.length > 0 && queue[0].id === tracks[0].id) {
       jumpTo(i);
     } else {
@@ -885,6 +1041,35 @@ function Results({ results, onRestart }) {
           </button>
           <button className="og-btn og-btn-ghost" onClick={onRestart}>start a new one</button>
         </div>
+
+        {playAlong.isGroup && (
+          <div className="og-pa">
+            <div className="og-pa-row">
+              <span className="og-pa-label">
+                {playAlong.isHost ? '🎧 dj mode' : '🎧 play along'}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={playAlong.mode === 'along'}
+                aria-label={playAlong.isHost ? 'DJ mode' : 'Play along'}
+                className={`og-pa-switch ${playAlong.mode === 'along' ? 'is-on' : ''}`}
+                onClick={() => playAlong.setMode(playAlong.mode === 'along' ? 'solo' : 'along')}
+              >
+                <span className="og-pa-knob" />
+              </button>
+            </div>
+            <p className="og-pa-hint">
+              {playAlong.isHost
+                ? (playAlong.mode === 'along'
+                    ? 'the group is hearing what you play.'
+                    : 'playing solo — flip on to dj for everyone.')
+                : (playAlong.mode === 'along'
+                    ? 'in sync with the host · pick a track to go solo.'
+                    : 'playing on your own.')}
+            </p>
+          </div>
+        )}
       </div>
       <div className="og-r-right">
         <div className="og-tl-head"><span>nº</span><span>track</span><span>artist</span><span>lang</span><span>time</span><span></span></div>
@@ -1461,33 +1646,55 @@ function GroupLobby({ group: initialGroup, role, participantId, onTakeSurvey, on
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState(null);
 
-  // Poll the lobby state every 2.5s while waiting.
+  // Live lobby updates over a WebSocket (Django Channels). The backend pushes
+  // the full session snapshot on connect and again whenever someone joins,
+  // marks ready, or the host generates the playlist.
   useEffect(() => {
     if (group.status === 'generated') return;
     let cancelled = false;
-    const tick = async () => {
-      try {
-        const fresh = await API.fetchGroupSession(group.id);
+    let ws = null;
+    let reconnectTimer = null;
+
+    const applySnapshot = async (fresh) => {
+      if (cancelled) return;
+      if (fresh.status === 'generated' && fresh.playlistId) {
+        // Navigate BEFORE setGroup — otherwise the status-change re-render
+        // triggers this effect's cleanup (cancelled=true) mid-await, which
+        // would swallow onPlaylistReady and strand the user on the lobby.
+        const tracks = await API.fetchPlaylistTracks(fresh.playlistId);
         if (cancelled) return;
-        if (fresh.status === 'generated' && fresh.playlistId) {
-          // Navigate BEFORE setGroup — otherwise the status-change re-render
-          // triggers this effect's cleanup (cancelled=true) mid-await, which
-          // would swallow onPlaylistReady and strand the user on the lobby.
-          const tracks = await API.fetchPlaylistTracks(fresh.playlistId);
-          if (cancelled) return;
-          onPlaylistReady({
-            moodLabel: fresh.blendedMoodLabel || fresh.playlist?.moodLabel,
-            confidence: fresh.playlist?.confidence || 0,
-            tracks: tracks.map(t => ({ ...t.track, relevanceScore: t.relevanceScore })),
-            playlistId: fresh.playlistId,
-          });
-          return;
-        }
-        setGroup(fresh);
-      } catch (e) { /* poll quietly */ }
+        onPlaylistReady({
+          moodLabel: fresh.blendedMoodLabel || fresh.playlist?.moodLabel,
+          confidence: fresh.playlist?.confidence || 0,
+          tracks: tracks.map(t => ({ ...t.track, relevanceScore: t.relevanceScore })),
+          playlistId: fresh.playlistId,
+        });
+        return;
+      }
+      setGroup(fresh);
     };
-    const id = setInterval(tick, 2500);
-    return () => { cancelled = true; clearInterval(id); };
+
+    const connect = () => {
+      if (cancelled) return;
+      ws = new WebSocket(API.groupSessionSocketUrl(group.id, participantId));
+      ws.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.type === 'group.update' && msg.payload) applySnapshot(msg.payload);
+      };
+      ws.onclose = (ev) => {
+        // 4004 = server rejected an unknown group; don't retry that.
+        if (cancelled || ev.code === 4004) return;
+        reconnectTimer = setTimeout(connect, 2000);
+      };
+    };
+
+    connect();
+    return () => {
+      cancelled = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) { ws.onclose = null; ws.close(); }
+    };
   }, [group.id, group.status]);
 
   const me = group.participants?.find(p => p.id === participantId);
@@ -1742,6 +1949,7 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
         view={view}
         onHome={() => { setView('home'); setResults(null); }}
         onMyPlaylists={() => setView('mylists')}
+        onConcertMode={() => setView('concert')}
         onLogout={handleLogout}
       />
       <main className={`og-main view-${view}`}>
@@ -1750,6 +1958,7 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
             onStart={handleStartSession}
             onStartGroup={() => setShowCreateGroup(true)}
             onJoinGroup={() => setShowJoinGroup(true)}
+            onConcertMode={() => setView('concert')}
           />
         )}
         {view === 'mood' && (
@@ -1759,8 +1968,15 @@ function HarmonicOrganic({ density = 'airy', palette = 'sand', typeStyle = 'edit
             groupContext={groupCtx ? { groupId: groupCtx.id, participantId: groupCtx.participantId } : null}
           />
         )}
-        {view === 'results' && <Results results={results} onRestart={() => { setView('home'); setResults(null); setGroupCtx(null); }} />}
+        {view === 'results' && (
+          <Results
+            results={results}
+            groupCtx={groupCtx}
+            onRestart={() => { setView('home'); setResults(null); setGroupCtx(null); }}
+          />
+        )}
         {view === 'mylists' && <MyPlaylists onBack={() => setView('home')} />}
+        {view === 'concert' && <ConcertMode onBack={() => setView('home')} />}
         {view === 'group-lobby' && groupCtx && (
           <GroupLobby
             group={groupCtx.initial}

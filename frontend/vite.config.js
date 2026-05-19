@@ -45,9 +45,12 @@ export default defineConfig({
       '/moods':     'http://localhost:8000',
       '/playlists': 'http://localhost:8000',
       '/groups':    'http://localhost:8000',
+      '/concerts':  'http://localhost:8000',
       '/tracks':    'http://localhost:8000',
       '/feedback':  'http://localhost:8000',
       '/admin':     'http://localhost:8000',
+      // WebSocket for the live group lobby — `ws: true` upgrades the proxy.
+      '/ws':        { target: 'http://localhost:8000', ws: true },
     },
   },
   define: {

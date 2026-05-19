@@ -35,12 +35,16 @@ ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", ["127.0.0.1", "localhost"])
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS", [])
 
 INSTALLED_APPS = [
+    # `daphne` must lead the list: it swaps `runserver` for the ASGI dev
+    # server so WebSockets work in development without a separate process.
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "channels",
     "rest_framework",
     "corsheaders",
     "django_filters",
@@ -52,6 +56,7 @@ INSTALLED_APPS = [
     "playlists",
     "feedback",
     "groups",
+    "concerts",
     "rest_framework.authtoken",
 ]
 
@@ -94,6 +99,8 @@ default_db_engine = env("DB_ENGINE", "django.db.backends.sqlite3")
 default_db_name = str(BASE_DIR / "db.sqlite3")
 if "postgresql" in default_db_engine:
     default_db_name = env("POSTGRES_DB", "postgres")
+elif "cockroach" in default_db_engine:
+    default_db_name = env("POSTGRES_DB", "defaultdb")
 
 DATABASES = {
     "default": {
@@ -103,6 +110,12 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD", env("POSTGRES_PASSWORD", "")),
         "HOST": env("DB_HOST", "localhost"),
         "PORT": env("DB_PORT", "5432"),
+        "OPTIONS": {
+            "sslmode": env("DB_SSL_MODE", "prefer"),
+            **({
+                "sslrootcert": env("DB_SSL_ROOT_CERT")
+            } if env("DB_SSL_ROOT_CERT") else {}),
+        },
     }
 }
 
@@ -133,6 +146,12 @@ STATIC_ROOT = env("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles"))
 
 GROQ_API_KEY = env("GROQ_API_KEY", "")
 
+# Concert Mode. Live concert discovery scrapes AllEvents' public city pages
+# in real time — no API key needed (override the page URL with
+# CONCERT_EVENTS_URL if their scheme changes). setlist.fm weighting is
+# optional; without SETLISTFM_API_KEY playlists still build from the catalog.
+SETLISTFM_API_KEY = env("SETLISTFM_API_KEY", "")
+
 REDIS_URL = env("REDIS_URL", "redis://127.0.0.1:6379/0")
 
 CACHES = {
@@ -146,6 +165,17 @@ CACHES = {
             "IGNORE_EXCEPTIONS": True,
             "SOCKET_CONNECT_TIMEOUT": 5,
             "SOCKET_TIMEOUT": 5,
+        },
+    }
+}
+
+# Channels uses the same Redis instance as the cache. The channel layer
+# carries live group-lobby broadcasts between the ASGI workers.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [REDIS_URL],
         },
     }
 }

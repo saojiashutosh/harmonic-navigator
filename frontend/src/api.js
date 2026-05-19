@@ -229,6 +229,39 @@ export const deleteSavedPlaylist = async (savedPlaylistId) => {
   }
 };
 
+// ── Concert Mode ──────────────────────────────────────────────────────────────
+
+/**
+ * Discover upcoming concerts in a city for artists in the catalog.
+ * POST /concerts/events/discover/  → { city, count, events: [...], apiError }
+ */
+export const discoverConcerts = async (city) => {
+  const res = await fetch(`${BASE_URL}/concerts/events/discover/`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ city }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Failed to discover concerts: ${res.status}`);
+  return data;
+};
+
+/**
+ * Generate a setlist-weighted "get ready for the concert" playlist.
+ * POST /concerts/events/{id}/generate-playlist/
+ * Returns a ConcertPlaylist with nested `playlist` and `concertEvent`.
+ */
+export const generateConcertPlaylist = async (eventId, limit = 25) => {
+  const res = await fetch(`${BASE_URL}/concerts/events/${eventId}/generate-playlist/`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ limit }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `Failed to build concert playlist: ${res.status}`);
+  return data;
+};
+
 // ── Group Sessions ────────────────────────────────────────────────────────────
 
 export const createGroupSession = async (displayName) => {
@@ -280,6 +313,16 @@ export const generateGroupPlaylist = async (groupId) => {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || `Failed to generate: ${res.status}`);
   return data;
+};
+
+// Live group-session WebSocket (Django Channels): lobby updates plus the
+// host-driven "play along" playback sync. Same-origin so Vite's dev proxy
+// forwards it to Django; the scheme tracks the page (wss:// on HTTPS). The
+// participant id lets the backend tell whether this socket is the host.
+export const groupSessionSocketUrl = (groupId, participantId) => {
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const query = participantId ? `?participant=${encodeURIComponent(participantId)}` : '';
+  return `${scheme}://${window.location.host}/ws/groups/${groupId}/${query}`;
 };
 
 /**
