@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import tempfile
 from dataclasses import asdict, dataclass, field
 
@@ -27,6 +28,11 @@ logger = logging.getLogger(__name__)
 # chorus / main section, the most representative part, and keeps each
 # analysis fast regardless of full track length.
 ANALYSIS_DURATION_SEC = 60
+
+# Decode everything to this sample rate. 22.05 kHz keeps all musically
+# relevant content (Nyquist ~11 kHz) while roughly halving the work versus
+# 44.1 kHz — the standard rate for music information retrieval.
+TARGET_SR = 22050
 
 # Pitch-class names, index 0 = C.
 KEY_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -145,35 +151,68 @@ def _detect_key(chroma_mean: np.ndarray) -> tuple[int, int, float]:
     return best_key, best_mode, float(np.clip(best_score, 0.0, 1.0))
 
 
+def _probe_duration(path: str) -> float:
+    """Return a media file's duration in seconds via ffprobe (0.0 if unknown)."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", path],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return 0.0
+
+
 def load_audio(audio_bytes: bytes) -> tuple[np.ndarray, int, float]:
     """Decode audio bytes and return ``(waveform, sample_rate, full_duration)``.
 
-    The waveform is trimmed to the representative middle window.
+    Decoding is done directly with ffmpeg: JioSaavn serves AAC/.mp4, which
+    libsndfile cannot read, and librosa's ``audioread`` fallback decodes the
+    whole file painfully slowly. We instead ask ffmpeg to extract just the
+    representative middle window as a 22.05 kHz mono WAV, which librosa then
+    loads instantly. ``full_duration`` is the *whole* track's length.
     """
     import librosa
 
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
         tmp.write(audio_bytes)
-        tmp_path = tmp.name
+        src_path = tmp.name
+    wav_path = src_path + ".wav"
 
     try:
-        waveform, sample_rate = librosa.load(tmp_path, sr=None, mono=True)
-    finally:
+        full_duration = _probe_duration(src_path)
+
+        cmd = ["ffmpeg", "-y", "-loglevel", "error"]
+        # Fast input-seek to the central window when the track is long enough.
+        if full_duration > ANALYSIS_DURATION_SEC + 10:
+            start = (full_duration - ANALYSIS_DURATION_SEC) / 2
+            cmd += ["-ss", f"{start:.2f}", "-t", str(ANALYSIS_DURATION_SEC)]
+        cmd += ["-i", src_path, "-ac", "1", "-ar", str(TARGET_SR), wav_path]
+
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+            subprocess.run(cmd, capture_output=True, timeout=120, check=True)
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or b"").decode(errors="ignore")[:200]
+            raise AudioAnalysisError(f"ffmpeg could not decode audio: {detail}")
+        except subprocess.TimeoutExpired:
+            raise AudioAnalysisError("ffmpeg decode timed out")
+
+        waveform, sample_rate = librosa.load(wav_path, sr=None, mono=True)
+    finally:
+        for path in (src_path, wav_path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
     if waveform is None or len(waveform) == 0:
         raise AudioAnalysisError("Decoder produced empty audio")
 
-    full_duration = float(librosa.get_duration(y=waveform, sr=sample_rate))
-
-    # Keep only the central window when the track is comfortably longer.
-    if full_duration > ANALYSIS_DURATION_SEC + 10:
-        start = int((full_duration - ANALYSIS_DURATION_SEC) / 2 * sample_rate)
-        end = start + ANALYSIS_DURATION_SEC * sample_rate
-        waveform = waveform[start:end]
+    # ffmpeg already extracted the window; fall back to the segment length
+    # only when ffprobe could not report a duration.
+    if full_duration <= 0:
+        full_duration = float(len(waveform) / sample_rate)
 
     return waveform, sample_rate, full_duration
 
@@ -183,7 +222,6 @@ def extract_features(audio_bytes: bytes) -> FeatureVector:
     import librosa
 
     y, sr, full_duration = load_audio(audio_bytes)
-    nyquist = sr / 2.0
 
     # --- loudness & dynamics ------------------------------------------
     rms = librosa.feature.rms(y=y)[0]
@@ -203,10 +241,17 @@ def extract_features(audio_bytes: bytes) -> FeatureVector:
     contrast = float(np.mean(librosa.feature.spectral_contrast(y=y, sr=sr)))
     zcr = float(np.mean(librosa.feature.zero_crossing_rate(y=y)))
 
-    brightness = _norm(centroid, 0.0, nyquist)
-    spectral_rolloff = _norm(rolloff, 0.0, nyquist)
-    spectral_bandwidth = _norm(bandwidth, 0.0, nyquist)
-    spectral_contrast = _norm(contrast, 0.0, 50.0)
+    # Normalise against realistic *music* ranges, not the theoretical
+    # 0..Nyquist span — otherwise every track squashes into a narrow band
+    # and the features lose all discriminating power.
+    brightness = _norm(centroid, 500.0, 4000.0)
+    spectral_rolloff = _norm(rolloff, 1000.0, 8000.0)
+    spectral_bandwidth = _norm(bandwidth, 500.0, 4000.0)
+    spectral_contrast = _norm(contrast, 10.0, 35.0)
+    # Raw flatness (~0-0.3) and ZCR (~0-0.3) sit near zero for nearly all
+    # music; rescale so they actually separate acoustic from synthetic.
+    flatness = _norm(flatness, 0.0, 0.15)
+    zcr = _norm(zcr, 0.0, 0.25)
 
     # --- rhythm --------------------------------------------------------
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)

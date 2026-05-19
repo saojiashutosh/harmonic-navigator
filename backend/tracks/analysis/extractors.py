@@ -60,9 +60,9 @@ def extract_acousticness(fv: FeatureVector) -> float:
     clean_cue = 1.0 - fv.zero_crossing_rate       # less buzzy/distorted
 
     acousticness = (
-        0.35 * tonal_cue
-        + 0.30 * harmonic_cue
-        + 0.20 * low_freq_cue
+        0.45 * tonal_cue
+        + 0.25 * harmonic_cue
+        + 0.15 * low_freq_cue
         + 0.15 * clean_cue
     )
     return round(_clip01(acousticness), 4)
