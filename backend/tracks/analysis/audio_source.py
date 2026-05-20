@@ -50,8 +50,52 @@ def decrypt_saavn_url(encrypted_url: str) -> str:
     return result[: len(result) - pad_len].decode("utf-8").strip()
 
 
-def resolve_stream_url(title: str, artist_name: str = "") -> str:
-    """Search JioSaavn for a song and return its decrypted stream URL."""
+def _words(text) -> set:
+    """Lower-cased word set with punctuation stripped."""
+    return set(re.sub(r"[^\w\s]", " ", str(text or "").lower()).split())
+
+
+def _contained(query_words: set, target_words: set) -> float:
+    """Fraction of ``query_words`` present in ``target_words`` (0-1)."""
+    if not query_words:
+        return 0.0
+    return len(query_words & target_words) / len(query_words)
+
+
+def _result_artist_text(result: dict) -> str:
+    """Best-effort artist string from a JioSaavn search result."""
+    parts = [result.get("subtitle"), result.get("primary_artists"),
+             result.get("singers")]
+    more_info = result.get("more_info") or {}
+    parts += [more_info.get("singers"), more_info.get("primary_artists")]
+    return " ".join(str(p) for p in parts if p)
+
+
+def _match_score(result: dict, title: str, artist_name: str) -> float:
+    """Confidence (0-1) that a JioSaavn result is the song we asked for.
+
+    Combines how much of the requested title and artist appear in the
+    result — so covers, remixes by other artists and wrong songs score low.
+    """
+    res_title = result.get("song") or result.get("title") or ""
+    title_score = _contained(_words(title), _words(res_title))
+
+    artist_words = _words(artist_name)
+    if not artist_words:
+        return title_score
+    artist_score = _contained(artist_words, _words(_result_artist_text(result)))
+    return 0.6 * title_score + 0.4 * artist_score
+
+
+def resolve_stream_url(
+    title: str, artist_name: str = "", *, min_match: float = 0.0
+) -> str:
+    """Search JioSaavn for a song and return its decrypted stream URL.
+
+    ``min_match`` (0-1) rejects low-confidence matches: if the best result
+    scores below it, ``AudioAnalysisError`` is raised instead of returning
+    a likely-wrong recording. Default 0.0 keeps the lenient behaviour.
+    """
     query = f"{title} {artist_name}".strip()
     if not query:
         raise AudioAnalysisError("Cannot resolve stream URL: no title/artist")
@@ -75,17 +119,17 @@ def resolve_stream_url(title: str, artist_name: str = "") -> str:
     if not results:
         raise AudioAnalysisError(f"No JioSaavn results for: {query}")
 
-    # Pick the result whose title overlaps ours the most.
-    target_words = set(re.sub(r"[^\w\s]", "", title.lower()).split())
-    best, best_score = results[0], 0.0
+    # Pick the result that best matches both title and artist.
+    best, best_score = results[0], -1.0
     for result in results:
-        song_title = result.get("song") or result.get("title") or ""
-        words = set(re.sub(r"[^\w\s]", "", song_title.lower()).split())
-        if not words or not target_words:
-            continue
-        overlap = len(target_words & words) / max(len(target_words), len(words))
-        if overlap > best_score:
-            best, best_score = result, overlap
+        score = _match_score(result, title, artist_name)
+        if score > best_score:
+            best, best_score = result, score
+
+    if best_score < min_match:
+        raise AudioAnalysisError(
+            f"Low JioSaavn match confidence ({best_score:.2f}) for: {query}"
+        )
 
     encrypted_url = best.get("encrypted_media_url")
     if not encrypted_url:
@@ -119,12 +163,18 @@ def download_audio(url: str) -> bytes:
     return b"".join(chunks)
 
 
-def fetch_track_audio(title: str, artist_name: str = "", stream_url: str = "") -> tuple[bytes, str]:
+def fetch_track_audio(
+    title: str, artist_name: str = "", stream_url: str = "", *, min_match: float = 0.0
+) -> tuple[bytes, str]:
     """Fetch a track's audio. Returns ``(audio_bytes, resolved_url)``.
 
     Uses ``stream_url`` directly when supplied, otherwise searches JioSaavn.
+    ``min_match`` is forwarded to :func:`resolve_stream_url` to reject
+    low-confidence matches.
     """
-    audio_url = stream_url or resolve_stream_url(title, artist_name)
+    audio_url = stream_url or resolve_stream_url(
+        title, artist_name, min_match=min_match
+    )
     audio_bytes = download_audio(audio_url)
     if len(audio_bytes) < 10_000:
         raise AudioAnalysisError(

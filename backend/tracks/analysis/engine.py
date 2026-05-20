@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 
 from .audio_source import AudioAnalysisError, fetch_track_audio
+from .calibration import calibrate, load_calibration
 from .classifiers import get_estimator
 from .dsp import extract_features
 from .extractors import extract_base_features
@@ -23,32 +24,49 @@ logger = logging.getLogger(__name__)
 _CORE_FIELDS = ("energy", "valence", "tempoBpm")
 
 
-def analyze_audio_bytes(audio_bytes: bytes, *, metadata: dict | None = None) -> dict:
+def analyze_audio_bytes(
+    audio_bytes: bytes, *, metadata: dict | None = None, calibrated: bool = True
+) -> dict:
     """Analyse raw audio bytes and return a full feature dict.
 
     ``metadata`` (optional) carries non-audio context — currently
     ``language`` is used by the region classifier. The returned dict is
     JSON-safe and includes the low-level ``featureVector`` for auditing.
+
+    ``calibrated`` applies the fitted calibration profile to the measured
+    features. Pass ``calibrated=False`` to get the engine's *raw* output —
+    used by the ``calibrate_audio_engine`` command while fitting that
+    profile (so corrections are never fitted on top of corrections).
     """
     metadata = metadata or {}
+
+    def _adjust(feature: str, value):
+        return calibrate(feature, value) if calibrated else value
 
     # 1. Measure the signal.
     fv = extract_features(audio_bytes)
 
-    # 2. Deterministic features (direct measurements).
+    # 2. Deterministic features (direct measurements), calibration-corrected.
     base = extract_base_features(fv)
+    energy = round(_adjust("energy", base["energy"]), 4)
+    acousticness = round(_adjust("acousticness", base["acousticness"]), 4)
+    instrumentalness = round(_adjust("instrumentalness", base["instrumentalness"]), 4)
+    loudness = round(_adjust("loudness", base["loudness"]), 1)
 
     # 3. Build the flat feature map every classifier consumes.
     feature_map = fv.as_feature_map()
     feature_map.update(
-        energy=base["energy"],
-        acousticness=base["acousticness"],
-        instrumentalness=base["instrumentalness"],
-        loudness=base["loudness"],
+        energy=energy,
+        acousticness=acousticness,
+        instrumentalness=instrumentalness,
+        loudness=loudness,
     )
 
     # 4. Judgement features (heuristic today, ML-swappable).
-    valence = get_estimator("valence").predict(feature_map, metadata=metadata)
+    valence = round(
+        _adjust("valence", get_estimator("valence").predict(feature_map, metadata=metadata)),
+        4,
+    )
     feature_map["valence"] = valence
 
     mood = get_estimator("mood").predict(feature_map, metadata=metadata)
@@ -56,12 +74,12 @@ def analyze_audio_bytes(audio_bytes: bytes, *, metadata: dict | None = None) -> 
     region = get_estimator("region").predict(feature_map, metadata=metadata)
 
     return {
-        "energy": base["energy"],
+        "energy": energy,
         "valence": valence,
         "tempoBpm": base["tempoBpm"],
-        "acousticness": base["acousticness"],
-        "instrumentalness": base["instrumentalness"],
-        "loudness": base["loudness"],
+        "acousticness": acousticness,
+        "instrumentalness": instrumentalness,
+        "loudness": loudness,
         "keySignature": base["keySignature"],
         "key": base["key"],
         "mode": base["mode"],
@@ -72,6 +90,7 @@ def analyze_audio_bytes(audio_bytes: bytes, *, metadata: dict | None = None) -> 
         "region": region.label,
         "regionConfidence": region.confidence,
         "durationSec": fv.duration_sec,
+        "calibrated": bool(calibrated and load_calibration()),
         "featureVector": fv.as_dict(),
     }
 

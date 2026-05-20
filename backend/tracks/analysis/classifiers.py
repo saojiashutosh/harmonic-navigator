@@ -247,25 +247,36 @@ class HeuristicRegionClassifier(BaseClassifier):
 
 
 # ---------------------------------------------------------------------------
-# Registry — the single place to swap a heuristic for a trained model
+# Registry — defaults prefer trained models, fall back to heuristics
 # ---------------------------------------------------------------------------
-_DEFAULT_ESTIMATORS = {
-    "valence": HeuristicValenceRegressor(),
-    "mood": HeuristicMoodClassifier(),
-    "genre": HeuristicGenreClassifier(),
-    "region": HeuristicRegionClassifier(),
-}
+# Initialised lazily because ``tracks.analysis.models`` imports from this
+# module — going the other way would deadlock at import time.
+_DEFAULT_ESTIMATORS: dict | None = None
+
+
+def _init_defaults() -> dict:
+    global _DEFAULT_ESTIMATORS
+    if _DEFAULT_ESTIMATORS is not None:
+        return _DEFAULT_ESTIMATORS
+    from .models import ModelGenreClassifier, ModelValenceRegressor
+
+    _DEFAULT_ESTIMATORS = {
+        # Auto-use the trained ``.joblib`` if present; otherwise the
+        # Model* wrapper transparently falls back to the heuristic.
+        "valence": ModelValenceRegressor(),
+        "mood": HeuristicMoodClassifier(),
+        "genre": ModelGenreClassifier(),
+        "region": HeuristicRegionClassifier(),
+    }
+    return _DEFAULT_ESTIMATORS
 
 
 def get_estimator(kind: str):
     """Return the estimator for ``kind`` (valence/mood/genre/region).
 
-    A trained replacement can be registered without code changes by adding
-    to ``settings.AUDIO_ANALYSIS_ESTIMATORS`` a dotted import path, e.g.::
-
-        AUDIO_ANALYSIS_ESTIMATORS = {
-            "genre": "tracks.analysis.models.CnnGenreClassifier",
-        }
+    Resolution order:
+      1. ``settings.AUDIO_ANALYSIS_ESTIMATORS[kind]`` dotted-path override
+      2. Default — trained model if available, heuristic otherwise
     """
     try:
         from django.conf import settings
@@ -274,7 +285,7 @@ def get_estimator(kind: str):
         override = getattr(settings, "AUDIO_ANALYSIS_ESTIMATORS", None) or {}
         if kind in override:
             return import_string(override[kind])()
-    except Exception:  # pragma: no cover - fall back to the heuristic
-        logger.warning("Estimator override for %r failed; using heuristic", kind)
+    except Exception:  # pragma: no cover - fall back to the default
+        logger.warning("Estimator override for %r failed; using default", kind)
 
-    return _DEFAULT_ESTIMATORS[kind]
+    return _init_defaults()[kind]
