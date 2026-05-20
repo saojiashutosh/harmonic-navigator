@@ -24,10 +24,15 @@ from .audio_source import AudioAnalysisError
 
 logger = logging.getLogger(__name__)
 
-# Analyse the middle 60 s of a track: that window almost always lands on a
-# chorus / main section, the most representative part, and keeps each
-# analysis fast regardless of full track length.
-ANALYSIS_DURATION_SEC = 60
+# Multi-window analysis: sample N evenly-spread windows of WINDOW_SEC each
+# and aggregate the per-window features. This removes the section-sampling
+# bias of looking at only one chunk (e.g. landing on a pad-only verse of an
+# EDM track and reading it as 'acoustic'). Medians across windows are robust
+# to a single weird section.
+WINDOW_SEC = 30
+N_WINDOWS = 3
+# librosa default onset hop length — used by tempo octave correction below.
+HOP_LENGTH = 512
 
 # Decode everything to this sample rate. 22.05 kHz keeps all musically
 # relevant content (Nyquist ~11 kHz) while roughly halving the work versus
@@ -168,10 +173,11 @@ def load_audio(audio_bytes: bytes) -> tuple[np.ndarray, int, float]:
     """Decode audio bytes and return ``(waveform, sample_rate, full_duration)``.
 
     Decoding is done directly with ffmpeg: JioSaavn serves AAC/.mp4, which
-    libsndfile cannot read, and librosa's ``audioread`` fallback decodes the
-    whole file painfully slowly. We instead ask ffmpeg to extract just the
-    representative middle window as a 22.05 kHz mono WAV, which librosa then
-    loads instantly. ``full_duration`` is the *whole* track's length.
+    libsndfile cannot read, and librosa's ``audioread`` fallback decodes
+    the whole file painfully slowly. We ask ffmpeg to render the entire
+    track to a 22.05 kHz mono WAV, which librosa then loads instantly.
+    Multi-window carving happens in :func:`extract_features` so the
+    ffmpeg pass runs once per song, not once per window.
     """
     import librosa
 
@@ -183,15 +189,13 @@ def load_audio(audio_bytes: bytes) -> tuple[np.ndarray, int, float]:
     try:
         full_duration = _probe_duration(src_path)
 
-        cmd = ["ffmpeg", "-y", "-loglevel", "error"]
-        # Fast input-seek to the central window when the track is long enough.
-        if full_duration > ANALYSIS_DURATION_SEC + 10:
-            start = (full_duration - ANALYSIS_DURATION_SEC) / 2
-            cmd += ["-ss", f"{start:.2f}", "-t", str(ANALYSIS_DURATION_SEC)]
-        cmd += ["-i", src_path, "-ac", "1", "-ar", str(TARGET_SR), wav_path]
+        # Decode the whole track once; multi-window carving happens in
+        # extract_features so we don't re-run ffmpeg per window.
+        cmd = ["ffmpeg", "-y", "-loglevel", "error",
+               "-i", src_path, "-ac", "1", "-ar", str(TARGET_SR), wav_path]
 
         try:
-            subprocess.run(cmd, capture_output=True, timeout=120, check=True)
+            subprocess.run(cmd, capture_output=True, timeout=180, check=True)
         except subprocess.CalledProcessError as exc:
             detail = (exc.stderr or b"").decode(errors="ignore")[:200]
             raise AudioAnalysisError(f"ffmpeg could not decode audio: {detail}")
@@ -217,11 +221,77 @@ def load_audio(audio_bytes: bytes) -> tuple[np.ndarray, int, float]:
     return waveform, sample_rate, full_duration
 
 
-def extract_features(audio_bytes: bytes) -> FeatureVector:
-    """Run the full DSP pass over ``audio_bytes`` and return a FeatureVector."""
+def _octave_correct_tempo(raw_bpm: int, onset_env: np.ndarray,
+                          sr: int, hop_length: int = HOP_LENGTH) -> int:
+    """Pick the most plausible octave-equivalent of ``raw_bpm``.
+
+    ``librosa.beat.beat_track`` sometimes locks onto a half- or double-time
+    beat — e.g. a 165 BPM dance track reads as 83. We score the candidate
+    × ½ / 1 / 2 by its onset-autocorrelation support and give a small
+    bonus to the musically common 80–160 BPM band, then pick the winner.
+    """
     import librosa
 
-    y, sr, full_duration = load_audio(audio_bytes)
+    candidates = []
+    for factor in (0.5, 1.0, 2.0):
+        bpm = raw_bpm * factor
+        if 40 <= bpm <= 220:
+            candidates.append(bpm)
+    if not candidates or len(onset_env) < 16:
+        return raw_bpm
+
+    autocorr = librosa.autocorrelate(onset_env)
+    if autocorr[0] <= 0:
+        return raw_bpm
+
+    scored = []
+    for bpm in candidates:
+        # Lag (in onset-envelope frames) corresponding to one beat period.
+        lag = int(round((60.0 / bpm) * (sr / hop_length)))
+        if 1 <= lag < len(autocorr):
+            support = float(autocorr[lag] / autocorr[0])
+            if 80 <= bpm <= 160:
+                support *= 1.15
+            scored.append((bpm, support))
+    if not scored:
+        return raw_bpm
+    best_bpm, _ = max(scored, key=lambda x: x[1])
+    return int(round(best_bpm))
+
+
+def _carve_windows(y_full: np.ndarray, sr: int, full_duration: float,
+                   n: int = N_WINDOWS, window_sec: float = WINDOW_SEC
+                   ) -> list[np.ndarray]:
+    """Carve ``n`` evenly-spread analysis windows out of the full waveform.
+
+    Each window is centred at the (k+½)/n fraction of the track, so for
+    n=3 we sample roughly the 1/6, 1/2, 5/6 marks. Short tracks fall back
+    to a single full-track window.
+    """
+    total = len(y_full)
+    if full_duration <= window_sec * 1.1:
+        return [y_full]
+
+    window_samples = int(window_sec * sr)
+    windows: list[np.ndarray] = []
+    for k in range(n):
+        frac = (k + 0.5) / n
+        centre = int(frac * total)
+        start = max(0, centre - window_samples // 2)
+        end = min(total, start + window_samples)
+        start = max(0, end - window_samples)  # tighten if we ran off the end
+        windows.append(y_full[start:end])
+    return windows
+
+
+def _compute_segment_features(y: np.ndarray, sr: int) -> dict:
+    """Run the DSP pass for one analysis window and return a flat dict.
+
+    Returns scalar features plus the raw chroma_mean / mfcc_mean arrays so
+    the aggregator can re-derive the song-level key from averaged chroma
+    instead of voting over per-window keys.
+    """
+    import librosa
 
     # --- loudness & dynamics ------------------------------------------
     rms = librosa.feature.rms(y=y)[0]
@@ -237,26 +307,22 @@ def extract_features(audio_bytes: bytes) -> FeatureVector:
     centroid = float(np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)))
     rolloff = float(np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr)))
     bandwidth = float(np.mean(librosa.feature.spectral_bandwidth(y=y, sr=sr)))
-    flatness = float(np.mean(librosa.feature.spectral_flatness(y=y)))
-    contrast = float(np.mean(librosa.feature.spectral_contrast(y=y, sr=sr)))
-    zcr = float(np.mean(librosa.feature.zero_crossing_rate(y=y)))
+    flatness_raw = float(np.mean(librosa.feature.spectral_flatness(y=y)))
+    contrast_raw = float(np.mean(librosa.feature.spectral_contrast(y=y, sr=sr)))
+    zcr_raw = float(np.mean(librosa.feature.zero_crossing_rate(y=y)))
 
-    # Normalise against realistic *music* ranges, not the theoretical
-    # 0..Nyquist span — otherwise every track squashes into a narrow band
-    # and the features lose all discriminating power.
     brightness = _norm(centroid, 500.0, 4000.0)
     spectral_rolloff = _norm(rolloff, 1000.0, 8000.0)
     spectral_bandwidth = _norm(bandwidth, 500.0, 4000.0)
-    spectral_contrast = _norm(contrast, 10.0, 35.0)
-    # Raw flatness (~0-0.3) and ZCR (~0-0.3) sit near zero for nearly all
-    # music; rescale so they actually separate acoustic from synthetic.
-    flatness = _norm(flatness, 0.0, 0.15)
-    zcr = _norm(zcr, 0.0, 0.25)
+    spectral_contrast = _norm(contrast_raw, 10.0, 35.0)
+    spectral_flatness = _norm(flatness_raw, 0.0, 0.15)
+    zero_crossing_rate = _norm(zcr_raw, 0.0, 0.25)
 
     # --- rhythm --------------------------------------------------------
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
     tempo, _ = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
-    tempo_bpm = int(round(float(np.atleast_1d(tempo)[0])))
+    raw_tempo = int(round(float(np.atleast_1d(tempo)[0])))
+    tempo_bpm = _octave_correct_tempo(raw_tempo, onset_env, sr)
     tempo_bpm = max(40, min(220, tempo_bpm))
 
     onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
@@ -264,8 +330,6 @@ def extract_features(audio_bytes: bytes) -> FeatureVector:
     onset_rate = float(len(onsets) / segment_dur)
     beat_strength = _norm(float(np.percentile(onset_env, 90)), 0.0, 6.0)
 
-    # Pulse clarity: how sharply the onset envelope auto-correlates — a
-    # steady four-on-the-floor beat peaks hard, rubato/ambient does not.
     autocorr = librosa.autocorrelate(onset_env - onset_env.mean())
     if len(autocorr) > 4 and autocorr[0] > 0:
         pulse_clarity = _norm(float(np.max(autocorr[2:]) / autocorr[0]), 0.0, 1.0)
@@ -289,38 +353,80 @@ def extract_features(audio_bytes: bytes) -> FeatureVector:
     vocal_mask = (freqs >= 300) & (freqs <= 3000)
     vocal_band_ratio = float(np.sum(power[vocal_mask, :]) / total_power)
 
-    # --- tonality ------------------------------------------------------
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-    chroma_mean = np.mean(chroma, axis=1)
-    key, mode, key_strength = _detect_key(chroma_mean)
-    chroma_norm = (chroma_mean / (chroma_mean.sum() + 1e-10)).tolist()
+    # --- chroma & mfcc (kept as arrays for cross-window averaging) ----
+    chroma_mean = np.mean(librosa.feature.chroma_cqt(y=y, sr=sr), axis=1)
+    mfcc_mean = np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13), axis=1)
 
-    mfcc = np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13), axis=1).tolist()
+    return {
+        "rms_mean": rms_mean, "rms_std": rms_std,
+        "dynamic_range": dynamic_range, "loudness_db": loudness_db,
+        "brightness": brightness, "spectral_rolloff": spectral_rolloff,
+        "spectral_bandwidth": spectral_bandwidth,
+        "spectral_flatness": spectral_flatness,
+        "spectral_contrast": spectral_contrast,
+        "zero_crossing_rate": zero_crossing_rate,
+        "tempo_bpm": tempo_bpm,
+        "beat_strength": beat_strength, "onset_rate": onset_rate,
+        "pulse_clarity": pulse_clarity,
+        "harmonic_ratio": harmonic_ratio,
+        "percussive_ratio": percussive_ratio,
+        "low_freq_ratio": low_freq_ratio,
+        "vocal_band_ratio": vocal_band_ratio,
+        "chroma_mean": chroma_mean,
+        "mfcc_mean": mfcc_mean,
+    }
+
+
+def _aggregate_segments(segments: list[dict], sr: int,
+                        full_duration: float) -> FeatureVector:
+    """Combine per-segment features into one FeatureVector.
+
+    **Median** across segments for scalars (robust to a single odd
+    window), **average** the chroma vectors and re-run Krumhansl on the
+    result (one canonical key per song), and **average** the MFCC
+    fingerprints.
+    """
+    def med(key: str) -> float:
+        return float(np.median([s[key] for s in segments]))
+
+    chroma_avg = np.mean([s["chroma_mean"] for s in segments], axis=0)
+    mfcc_avg = np.mean([s["mfcc_mean"] for s in segments], axis=0)
+    key, mode, key_strength = _detect_key(chroma_avg)
+    chroma_norm = (chroma_avg / (chroma_avg.sum() + 1e-10)).tolist()
+
+    tempo_bpm = int(round(float(np.median([s["tempo_bpm"] for s in segments]))))
+    tempo_bpm = max(40, min(220, tempo_bpm))
 
     return FeatureVector(
-        rms_mean=round(rms_mean, 6),
-        rms_std=round(rms_std, 6),
-        dynamic_range=round(dynamic_range, 4),
-        loudness_db=round(loudness_db, 2),
-        brightness=round(brightness, 4),
-        spectral_rolloff=round(spectral_rolloff, 4),
-        spectral_bandwidth=round(spectral_bandwidth, 4),
-        spectral_flatness=round(flatness, 4),
-        spectral_contrast=round(spectral_contrast, 4),
-        zero_crossing_rate=round(zcr, 4),
+        rms_mean=round(med("rms_mean"), 6),
+        rms_std=round(med("rms_std"), 6),
+        dynamic_range=round(med("dynamic_range"), 4),
+        loudness_db=round(med("loudness_db"), 2),
+        brightness=round(med("brightness"), 4),
+        spectral_rolloff=round(med("spectral_rolloff"), 4),
+        spectral_bandwidth=round(med("spectral_bandwidth"), 4),
+        spectral_flatness=round(med("spectral_flatness"), 4),
+        spectral_contrast=round(med("spectral_contrast"), 4),
+        zero_crossing_rate=round(med("zero_crossing_rate"), 4),
         tempo_bpm=tempo_bpm,
-        beat_strength=round(beat_strength, 4),
-        onset_rate=round(onset_rate, 3),
-        pulse_clarity=round(pulse_clarity, 4),
-        harmonic_ratio=round(harmonic_ratio, 4),
-        percussive_ratio=round(percussive_ratio, 4),
-        low_freq_ratio=round(low_freq_ratio, 4),
-        vocal_band_ratio=round(vocal_band_ratio, 4),
-        key=key,
-        mode=mode,
-        key_strength=round(key_strength, 4),
+        beat_strength=round(med("beat_strength"), 4),
+        onset_rate=round(med("onset_rate"), 3),
+        pulse_clarity=round(med("pulse_clarity"), 4),
+        harmonic_ratio=round(med("harmonic_ratio"), 4),
+        percussive_ratio=round(med("percussive_ratio"), 4),
+        low_freq_ratio=round(med("low_freq_ratio"), 4),
+        vocal_band_ratio=round(med("vocal_band_ratio"), 4),
+        key=key, mode=mode, key_strength=round(key_strength, 4),
         chroma=[round(c, 4) for c in chroma_norm],
-        mfcc=[round(m, 3) for m in mfcc],
+        mfcc=[round(m, 3) for m in mfcc_avg.tolist()],
         duration_sec=round(full_duration, 1),
         sample_rate=sr,
     )
+
+
+def extract_features(audio_bytes: bytes) -> FeatureVector:
+    """Run the multi-window DSP pass and return one aggregated FeatureVector."""
+    y_full, sr, full_duration = load_audio(audio_bytes)
+    windows = _carve_windows(y_full, sr, full_duration)
+    segments = [_compute_segment_features(y, sr) for y in windows]
+    return _aggregate_segments(segments, sr, full_duration)

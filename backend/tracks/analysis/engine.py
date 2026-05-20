@@ -129,6 +129,7 @@ def analyze_track(track, *, force: bool = False) -> dict | None:
             "language": track.language,
             "artist": artist_name,
             "source": track.source,
+            "release_year": track.releaseYear,
         }
         features = analyze_audio_bytes(audio_bytes, metadata=metadata)
 

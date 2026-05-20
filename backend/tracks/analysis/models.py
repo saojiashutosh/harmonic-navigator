@@ -82,6 +82,11 @@ def _hybrid_overlay(prediction: Prediction, features: dict, metadata: dict | Non
     metadata = metadata or {}
     language = (metadata.get("language") or "").strip().lower()
     is_indian = language in _INDIAN_LANGUAGES
+    # Era hint — pre-1990 Indian recordings are far more likely to be
+    # ghazal/classical than modern Bollywood, so we relax the tempo gate
+    # a little for old tracks.
+    release_year = metadata.get("release_year")
+    era_old = release_year is not None and release_year < 1990
 
     tempo = features.get("tempo_bpm", 0)
     mode = features.get("mode", 1)
@@ -92,10 +97,14 @@ def _hybrid_overlay(prediction: Prediction, features: dict, metadata: dict | Non
 
     overlay_scores = dict(prediction.scores)
 
-    # 1. Ghazal — slow, minor-mode, vocal-forward acoustic in an Indian language.
-    if (is_indian and mode == 0 and tempo < 105
+    # 1. Ghazal — slow, minor-mode, vocal-forward acoustic in an Indian
+    #    language. Old recordings get a looser tempo gate.
+    ghazal_tempo_cap = 115 if (is_indian and era_old) else 105
+    if (is_indian and mode == 0 and tempo < ghazal_tempo_cap
             and acousticness >= 0.45 and vocal >= 0.30):
-        overlay_scores["_overlay"] = "indian-slow-minor"
+        overlay_scores["_overlay"] = (
+            "indian-old-slow-minor" if era_old else "indian-slow-minor"
+        )
         return Prediction("ghazal", min(0.85, prediction.confidence + 0.10),
                           overlay_scores)
 
