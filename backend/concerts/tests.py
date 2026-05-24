@@ -222,7 +222,7 @@ class ConcertPlaylistTests(TestCase):
         self.assertEqual(artist_ids, {self.artist.id})
 
     @patch("concerts.services.setlistfm_client.recent_setlists")
-    def test_playlist_excludes_devotional_and_non_bollywood_marathi(self, mock_setlist):
+    def test_playlist_excludes_devotional_but_includes_other_languages(self, mock_setlist):
         mock_setlist.return_value = []
         # Devotional song by the concert artist — must be kept out.
         Track.objects.create(
@@ -233,8 +233,8 @@ class ConcertPlaylistTests(TestCase):
             title="Evening Raag", artistId=self.artist,
             language="hindi", genre="bhajan",
         )
-        # An English-language track — outside Bollywood/Marathi scope.
-        Track.objects.create(
+        # An English-language track — now eligible, must be included.
+        english = Track.objects.create(
             title="Midnight Drive", artistId=self.artist, language="english",
         )
         # A Marathi track — eligible, must be included.
@@ -249,11 +249,12 @@ class ConcertPlaylistTests(TestCase):
             .filter(playlistId=concert_playlist.playlistId)
             .values_list("trackId__title", flat=True)
         )
-        # Two Hindi setUp hits + the Marathi track survive the filter.
+        # Two Hindi setUp hits + the Marathi track + the English track survive the filter.
         self.assertEqual(
-            titles, {"Tum Hi Ho", "Phir Le Aaya Dil", "Apsara Aali"},
+            titles, {"Tum Hi Ho", "Phir Le Aaya Dil", "Apsara Aali", "Midnight Drive"},
         )
         self.assertIn(marathi.title, titles)
+        self.assertIn(english.title, titles)
 
 
 class ConcertScraperTests(TestCase):
@@ -302,3 +303,54 @@ class ConcertScraperTests(TestCase):
         ), patch("helpers.allevents_client.cache.get", return_value=None):
             with self.assertRaises(AllEventsScrapeError):
                 allevents_client.search_events("Mumbai")
+
+
+class ConcertDynamicIngestionTests(TestCase):
+    @patch("concerts.services.allevents_client.search_events")
+    @patch("concerts.services.saavn_client.search_songs")
+    def test_discover_dynamically_ingests_and_verifies_artist(self, mock_search_songs, mock_search_events):
+        # 1. Mock AllEvents scrape to return a concert for "Rahul Deshpande"
+        mock_search_events.return_value = [
+            {
+                "external_id": "DYN_EVT_1",
+                "name": "Abhangawari by Rahul Deshpande - Mumbai",
+                "venue_name": "Shanmukhananda Hall",
+                "city": "Mumbai",
+                "country": "India",
+                "event_date": "2099-07-18",
+                "ticket_url": "https://allevents.in/mumbai/rahul-deshpande",
+                "image_url": None,
+                "attractions": [],
+                "tags": ["classical"],
+            }
+        ]
+
+        # 2. Mock JioSaavn search to return songs by "Rahul Deshpande"
+        mock_search_songs.return_value = [
+            {
+                "saavn_id": "song123",
+                "title": "Abhang",
+                "artist": "Rahul Deshpande",
+                "language": "marathi",
+                "year": 2022,
+                "duration_ms": 300000,
+                "is_explicit": False,
+                "image_url": None,
+            }
+        ]
+
+        # 3. Ensure Rahul Deshpande does not exist in the database initially
+        self.assertFalse(Artist.objects.filter(name="Rahul Deshpande").exists())
+
+        # 4. Trigger discovery
+        events = discover_concerts("Mumbai")
+
+        # 5. Assertions: Artist should have been created, and the concert event saved
+        self.assertEqual(len(events), 1)
+        self.assertTrue(Artist.objects.filter(name="Rahul Deshpande").exists())
+
+        artist = Artist.objects.get(name="Rahul Deshpande")
+        self.assertEqual(events[0].artistId, artist)
+        self.assertEqual(events[0].name, "Abhangawari by Rahul Deshpande - Mumbai")
+        self.assertEqual(ConcertEvent.objects.count(), 1)
+
