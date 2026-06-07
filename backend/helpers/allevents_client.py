@@ -57,10 +57,16 @@ def _city_slug(city: str) -> str:
     return "-".join((city or "").strip().lower().split())
 
 
-def _events_url(city: str) -> str:
+def _events_urls(city: str) -> list[str]:
     template = os.getenv("CONCERT_EVENTS_URL") or _DEFAULT_URL_TEMPLATE
     slug = _city_slug(city)
-    return template.format(slug=slug, city=slug)
+    if template == _DEFAULT_URL_TEMPLATE:
+        return [
+            f"https://allevents.in/{slug}/music",
+            f"https://allevents.in/{slug}/concerts",
+            f"https://allevents.in/{slug}/festivals",
+        ]
+    return [template.format(slug=slug, city=slug)]
 
 
 def search_events(city: str, *, size: int = 100) -> list[dict]:
@@ -79,38 +85,45 @@ def search_events(city: str, *, size: int = 100) -> list[dict]:
     if cached is not None:
         return cached
 
-    try:
-        response = requests.get(
-            _events_url(city), headers=_BROWSER_HEADERS, timeout=15,
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise AllEventsScrapeError(
-            f"Could not reach AllEvents for '{city}': {exc}"
-        ) from exc
-
-    html = response.text
-    raw_events = _events_from_jsonld(html) or _events_from_next_data(html)
-
     results: list[dict] = []
     seen: set = set()
-    for raw in raw_events:
-        normalised = _normalise_event(raw, city)
-        if not normalised:
-            continue
-        key = normalised["external_id"] or normalised["name"]
-        if key in seen:
-            continue
-        seen.add(key)
-        results.append(normalised)
-        if len(results) >= size:
-            break
+    urls = _events_urls(city)
+    scrape_errors: list[str] = []
+
+    for url in urls:
+        try:
+            response = requests.get(
+                url, headers=_BROWSER_HEADERS, timeout=15,
+            )
+            response.raise_for_status()
+            html = response.text
+            raw_events = _events_from_jsonld(html) or _events_from_next_data(html)
+            for raw in raw_events:
+                normalised = _normalise_event(raw, city)
+                if not normalised:
+                    continue
+                key = normalised["external_id"] or normalised["name"]
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append(normalised)
+        except requests.RequestException as exc:
+            scrape_errors.append(f"Error scraping {url}: {exc}")
+
+    # If ALL requests failed and we have no results, raise the scrape error.
+    if len(scrape_errors) == len(urls) and len(urls) > 0:
+        raise AllEventsScrapeError(
+            f"Could not reach AllEvents for '{city}': {'; '.join(scrape_errors)}"
+        )
+
+    results = results[:size]
 
     # Only cache a productive scrape — an empty result may be a transient
     # block, and shouldn't be frozen in for the full TTL.
     if results:
         cache.set(cache_key, results, _CACHE_TTL)
     return results
+
 
 
 # ── JSON-LD (schema.org) ────────────────────────────────────────────────────

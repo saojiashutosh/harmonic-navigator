@@ -94,6 +94,71 @@ def dedupe_concerts(events) -> list[ConcertEvent]:
     return unique
 
 
+def _extract_candidate_artist(event_name: str, city: str) -> str | None:
+    """Extract potential artist name from the event title using heuristic patterns."""
+    name = event_name
+    city_pat = re.compile(rf"\b{re.escape(city)}\b", re.IGNORECASE)
+    name = city_pat.sub("", name).strip()
+    name = re.sub(r"\s*[-–|]\s*$", "", name).strip()
+
+    # Pattern: "by <Artist>"
+    by_match = re.search(r"\bby\s+([^–|-]+)", name, re.IGNORECASE)
+    if by_match:
+        return by_match.group(1).strip()
+
+    # Pattern: "with - <Artist>" or "with <Artist>"
+    with_match = re.search(r"\bwith\s*(?:-\s*)?([^–|-]+)", name, re.IGNORECASE)
+    if with_match:
+        return with_match.group(1).strip()
+
+    # Pattern: "<Artist> Live in Concert" or "<Artist> Live"
+    live_match = re.search(r"^(.+?)\s+Live(?:\s+in\s+Concert)?", name, re.IGNORECASE)
+    if live_match:
+        return live_match.group(1).strip()
+
+    # Pattern: "<Artist> in Concert"
+    in_concert_match = re.search(r"^(.+?)\s+in\s+Concert", name, re.IGNORECASE)
+    if in_concert_match:
+        return in_concert_match.group(1).strip()
+
+    # Pattern: "<Artist> - <Event>"
+    dash_match = re.search(r"^(.+?)\s+[-–|]\s+", name)
+    if dash_match:
+        left = dash_match.group(1).strip()
+        if len(left.split()) <= 4:
+            return left
+
+    # Pattern: "<Artist> in <City>" (city removed leaves "in")
+    in_match = re.search(r"^(.+?)\s+in$", name, re.IGNORECASE)
+    if in_match:
+        return in_match.group(1).strip()
+
+    words = name.split()
+    if len(words) <= 3:
+        return name
+
+    return None
+
+
+def _verify_artist_on_saavn(artist_name: str) -> bool:
+    """Check if the artist name exists on JioSaavn with actual tracks."""
+    if not artist_name:
+        return False
+    try:
+        songs = saavn_client.search_songs(artist_name, limit=5)
+        if not songs:
+            return False
+        target = artist_name.lower().strip()
+        for song in songs:
+            artist_field = (song.get("artist") or "").lower().strip()
+            # If the candidate name matches or is part of the JioSaavn song artist field
+            if target in artist_field or artist_field in target:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def discover_concerts(city: str) -> list[ConcertEvent]:
     """Discover upcoming concerts in `city` for artists in the catalog.
 
@@ -128,10 +193,33 @@ def discover_concerts(city: str) -> list[ConcertEvent]:
         haystack = _event_haystack(event)
         if not haystack:
             continue
+
+        # 1. Match against existing artists in the database
+        matched_artist = None
         for artist, pattern in artist_patterns:
-            if not pattern.search(haystack):
-                continue
-            key = (event.get("external_id"), artist.id)
+            if pattern.search(haystack):
+                matched_artist = artist
+                break
+
+        # 2. If no existing artist matched, try to dynamically extract and verify from JioSaavn
+        if not matched_artist:
+            candidate = _extract_candidate_artist(event.get("name") or "", city)
+            if candidate and len(_normalise_phrase(candidate)) >= MIN_ARTIST_MATCH_LENGTH:
+                # Check if this new artist name is verified on JioSaavn
+                if _verify_artist_on_saavn(candidate):
+                    # Check if they exist in the DB (case insensitive look-up to prevent duplicates)
+                    matched_artist = Artist.objects.filter(name__iexact=candidate).first()
+                    if not matched_artist:
+                        matched_artist = Artist.objects.create(name=candidate)
+                        # Proactively add the new artist pattern for subsequent events in this run
+                        phrase = _normalise_phrase(matched_artist.name)
+                        artist_patterns.append(
+                            (matched_artist, re.compile(rf"\b{re.escape(phrase)}\b"))
+                        )
+
+        # 3. If we successfully found/created a matched artist, save the event
+        if matched_artist:
+            key = (event.get("external_id"), matched_artist.id)
             if key in seen:
                 continue
             seen.add(key)
@@ -141,7 +229,7 @@ def discover_concerts(city: str) -> list[ConcertEvent]:
             # lists it twice under different URLs. A different date is a
             # genuinely different show and is kept.
             if event_date and ConcertEvent.objects.filter(
-                artistId=artist,
+                artistId=matched_artist,
                 eventDate=event_date,
                 venueName=event.get("venue_name"),
             ).exclude(externalId=event.get("external_id")).exists():
@@ -149,7 +237,7 @@ def discover_concerts(city: str) -> list[ConcertEvent]:
 
             concert, _ = ConcertEvent.objects.update_or_create(
                 externalId=event.get("external_id"),
-                artistId=artist,
+                artistId=matched_artist,
                 defaults={
                     "name": event.get("name"),
                     "venueName": event.get("venue_name"),
@@ -176,15 +264,9 @@ def _is_devotional(*texts: str | None) -> bool:
 def _eligible_artist_tracks(artist: Artist):
     """Return an artist's concert-eligible tracks.
 
-    Concert playlists recommend Bollywood (Hindi) and Marathi songs only:
-    a track qualifies when its language is Hindi/Marathi or its genre names
-    one of those (covers "bollywood"). Devotional / spiritual songs — matched
-    by keyword in the title or genre — are excluded.
+    Concert playlists recommend all songs by the artist except devotional/spiritual
+    songs, which are matched by keyword in the title or genre.
     """
-    language_match = Q(language__in=CONCERT_LANGUAGES)
-    for term in (*CONCERT_LANGUAGES, "bollywood"):
-        language_match |= Q(genre__icontains=term)
-
     devotional = Q()
     for keyword in DEVOTIONAL_KEYWORDS:
         devotional |= Q(title__icontains=keyword) | Q(genre__icontains=keyword)
@@ -192,7 +274,6 @@ def _eligible_artist_tracks(artist: Artist):
     return (
         Track.objects.select_related("artistId")
         .filter(artistId=artist, isActive=True)
-        .filter(language_match)
         .exclude(devotional)
     )
 
@@ -201,11 +282,10 @@ def _ensure_artist_tracks(artist: Artist, *, minimum: int) -> None:
     """Top up an artist's catalog from JioSaavn when too few tracks exist locally.
 
     Concert playlists are artist-only, so a thin local catalog would yield a
-    short playlist. When fewer than `minimum` concert-eligible tracks (Bollywood
-    / Marathi, non-devotional) are stored for the artist, fetch more of their
-    songs from JioSaavn and import them under the same catalog artist. Songs
-    that aren't Hindi/Marathi, or that look devotional, are skipped. Silently
-    no-ops when JioSaavn is unreachable, falling back to what is stored locally.
+    short playlist. When fewer than `minimum` concert-eligible tracks
+    are stored for the artist, fetch more of their songs from JioSaavn and
+    import them under the same catalog artist. Silently no-ops when JioSaavn is
+    unreachable, falling back to what is stored locally.
     """
     existing = _eligible_artist_tracks(artist).count()
     if existing >= minimum:
@@ -229,9 +309,6 @@ def _ensure_artist_tracks(artist: Artist, *, minimum: int) -> None:
             and target not in candidate
             and candidate not in target
         ):
-            continue
-        # Bollywood (Hindi) and Marathi only — skip other languages.
-        if (song.get("language") or "").lower() not in CONCERT_LANGUAGES:
             continue
         # Keep devotional / spiritual songs out of concert playlists.
         if _is_devotional(song.get("title")):
