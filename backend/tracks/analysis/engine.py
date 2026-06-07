@@ -102,6 +102,7 @@ def analyze_track(track, *, force: bool = False) -> dict | None:
     With ``force=False`` a track that already has the core features is
     skipped untouched.
     """
+    from django.db import close_old_connections
     from django.utils import timezone
 
     from tracks.models import AudioFeatureSnapshot
@@ -170,6 +171,10 @@ def analyze_track(track, *, force: bool = False) -> dict | None:
         track.featuresSyncedAt = timezone.now()
         update_fields.append("featuresSyncedAt")
 
+        # librosa + audio download took 15+ seconds with no DB activity —
+        # Postgres often drops idle connections in that window. Force-close
+        # any stale connection so the save below transparently reopens one.
+        close_old_connections()
         track.save(update_fields=update_fields)
 
         # 4. Keep an immutable, auditable snapshot of every run.
