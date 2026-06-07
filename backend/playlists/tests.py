@@ -3,6 +3,7 @@ from rest_framework.test import APITestCase
 
 from moods.constants import QUESTION_DEFINITIONS
 from moods.models import Answer, MoodInference, MoodSession, Question
+from playlists.constants import GUEST_PLAYLIST_SIZE
 from playlists.models import Playlist, PlaylistTrack
 from tracks.models import Artist, Track
 from users.models import Users
@@ -105,9 +106,7 @@ class PlaylistGenerationTests(APITestCase):
                 Answer(moodSessionId=session, questionId=question_map["mental_state"], rawValue="sharp", value=1.0),
                 Answer(moodSessionId=session, questionId=question_map["activity"], rawValue="working", value=1.0),
                 Answer(moodSessionId=session, questionId=question_map["social_setting"], rawValue="meeting", value=1.0),
-                Answer(moodSessionId=session, questionId=question_map["music_preference"], rawValue="lyrics", value=1.0),
                 Answer(moodSessionId=session, questionId=question_map["music_language"], rawValue="hindi", value=1.0),
-                Answer(moodSessionId=session, questionId=question_map["music_style"], rawValue="bollywood", value=1.0),
                 Answer(moodSessionId=session, questionId=question_map["playlist_goal"], rawValue="focus", value=1.0),
                 Answer(moodSessionId=session, questionId=question_map["preferred_artist"], rawValue="Teju", value=1.0),
             ]
@@ -128,7 +127,11 @@ class PlaylistGenerationTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         playlist = Playlist.objects.get(id=response.data["id"])
         self.assertEqual(playlist.moodLabel, "focused")
-        self.assertEqual(playlist.trackCount, 4)
+        # music_language=hindi applies a hard language filter, so only the two
+        # hindi tracks in the fixture survive (Deep Focus / Party Starter are
+        # dropped). The request-body "limit" is ignored — the view sizes the
+        # playlist by auth tier (REGISTERED_PLAYLIST_SIZE).
+        self.assertEqual(playlist.trackCount, 2)
 
         playlist_tracks = list(
             PlaylistTrack.objects.filter(playlistId=playlist).order_by("position")
@@ -158,7 +161,6 @@ class PlaylistGenerationTests(APITestCase):
                 Answer(moodSessionId=session, questionId=question_map["mental_state"], rawValue="drifting", value=0.8),
                 Answer(moodSessionId=session, questionId=question_map["activity"], rawValue="relaxing", value=1.0),
                 Answer(moodSessionId=session, questionId=question_map["social_setting"], rawValue="alone", value=1.0),
-                Answer(moodSessionId=session, questionId=question_map["music_preference"], rawValue="no_lyrics", value=1.0),
             ]
         )
         MoodInference.objects.create(
@@ -178,4 +180,8 @@ class PlaylistGenerationTests(APITestCase):
         playlist = Playlist.objects.get(id=response.data["id"])
         self.assertIsNone(playlist.userId)
         self.assertEqual(playlist.moodLabel, "calm")
-        self.assertLessEqual(playlist.trackCount, 3)
+        # The view sizes guest playlists by GUEST_PLAYLIST_SIZE (15), not the
+        # request-body "limit". With no language/era filter and no calm-mood
+        # tracks to trigger the mood filter, all four fixture tracks qualify.
+        self.assertEqual(playlist.trackCount, 4)
+        self.assertLessEqual(playlist.trackCount, GUEST_PLAYLIST_SIZE)

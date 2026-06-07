@@ -10,7 +10,6 @@ from django.db.models import Q
 from helpers.cache_utils import CANDIDATE_POOL_TTL, pool_cache_key
 
 from feedback.models import TrackMoodScore, UserMoodPreference
-from moods.constants import MUSIC_PREFERENCE_OVERRIDES
 from moods.models import MoodInference, MoodSession
 from tracks.models import Track, TrackMoodTag
 
@@ -26,7 +25,6 @@ def build_playlist_for_session(
     inference, answer_map, chosen_tracks = _build_scored_tracklist(
         session, limit=limit
     )
-    music_preference = answer_map.get("music_preference")
 
     with transaction.atomic():
         playlist = Playlist.objects.create(
@@ -46,7 +44,6 @@ def build_playlist_for_session(
                     selectionReason=_selection_reason(
                         track=track,
                         mood_label=inference.moodLabel,
-                        music_preference=music_preference,
                     ),
                     relevanceScore=score,
                 )
@@ -77,8 +74,6 @@ def expand_playlist(playlist: Playlist, *, extra: int) -> Playlist:
     if not chosen_tracks:
         return playlist
 
-    music_preference = answer_map.get("music_preference")
-
     with transaction.atomic():
         PlaylistTrack.objects.bulk_create(
             [
@@ -89,7 +84,6 @@ def expand_playlist(playlist: Playlist, *, extra: int) -> Playlist:
                     selectionReason=_selection_reason(
                         track=track,
                         mood_label=inference.moodLabel,
-                        music_preference=music_preference,
                     ),
                     relevanceScore=score,
                 )
@@ -122,9 +116,7 @@ def _build_scored_tracklist(
         for answer in session.answer.select_related("questionId").all()
     }
     social_setting = answer_map.get("social_setting")
-    music_preference = answer_map.get("music_preference")
     music_language = answer_map.get("music_language")
-    music_style = answer_map.get("music_style")
     playlist_goal = answer_map.get("playlist_goal")
     preferred_artist = answer_map.get("preferred_artist")
     era_preference = answer_map.get("music_era")
@@ -132,7 +124,6 @@ def _build_scored_tracklist(
     type_weights = _resolve_type_weights(
         user_id=session.userId_id,
         mood_label=inference.moodLabel,
-        music_preference=music_preference,
     )
 
     # The questionnaire produces TWO signals:
@@ -176,9 +167,7 @@ def _build_scored_tracklist(
         mood_label=playlist_mood,
         secondary_mood=secondary_mood,
         social_setting=social_setting,
-        music_preference=music_preference,
         music_language=music_language,
-        music_style=music_style,
         preferred_artist=preferred_artist,
         era_preference=era_preference,
         limit=limit,
@@ -206,9 +195,7 @@ def _build_scored_tracklist(
             secondary_mood=secondary_mood,
             mood_blend_ratio=mood_blend_ratio,
             type_weights=type_weights,
-            music_preference=music_preference,
             music_language=music_language,
-            music_style=music_style,
             playlist_goal=playlist_goal,
             preferred_artist=preferred_artist,
             era_preference=era_preference,
@@ -313,9 +300,7 @@ def _build_candidate_pool(
     mood_label: str,
     secondary_mood: str | None = None,
     social_setting: str | None,
-    music_preference: str | None,
     music_language: str | None,
-    music_style: str | None,
     preferred_artist: str | None,
     era_preference: str | None = None,
     limit: int,
@@ -325,8 +310,6 @@ def _build_candidate_pool(
         secondary_mood=secondary_mood,
         social_setting=social_setting,
         music_language=music_language,
-        music_style=music_style,
-        music_preference=music_preference,
         preferred_artist=preferred_artist,
         era_preference=era_preference,
     )
@@ -355,18 +338,16 @@ def _build_candidate_pool(
     any_mood_q = mood_q | secondary_mood_q if secondary_mood else mood_q
 
     language_q = _language_query(music_language)
-    style_q = _style_query(music_style)
-    type_q = _type_query(music_preference)
     artist_q = _artist_query(preferred_artist)
     era_q = _era_query(era_preference)
 
     pool_size = max(limit * 25, 250)
     slice_size = max(limit * 8, 50)
     queries = [
-        # 1. Perfect match: all filters + era
-        artist_q & language_q & style_q & type_q & mood_q & era_q,
-        # 2. Era + language + mood (no style)
-        era_q & language_q & mood_q & type_q,
+        # 1. Perfect match: artist + language + mood + era
+        artist_q & language_q & mood_q & era_q,
+        # 2. Era + language + mood
+        era_q & language_q & mood_q,
         # 3. Era + language (any mood) — pulls ALL era-correct language tracks
         #    into the pool before non-era tracks so scoring can rank them first
         era_q & language_q,
@@ -374,27 +355,18 @@ def _build_candidate_pool(
         era_q & mood_q,
         # 5. Era only — maximise era-correct pool when era is requested
         era_q,
-        # 6-7. Artist combos (artist preference overrides era)
-        artist_q & language_q & type_q,
-        artist_q & style_q & type_q,
-        # 8-9. Language + style/mood combos (no era)
-        language_q & style_q & type_q & mood_q,
-        language_q & style_q & type_q,
-        # 10-13. Partial combos prioritising language
+        # 6. Artist + language
+        artist_q & language_q,
+        # 7-9. Partial combos prioritising language
         artist_q & any_mood_q,
-        language_q & mood_q & type_q,
+        language_q & mood_q,
         language_q & any_mood_q,
-        language_q & type_q,
-        # 14. Language only
+        # 10. Language only
         language_q,
-        # 15-17. Style / mood fallbacks
-        style_q & mood_q & type_q,
-        style_q & type_q,
-        any_mood_q & type_q,
-        # 18-21. Bare fallbacks
-        artist_q,
-        type_q,
+        # 11-12. Mood / artist fallbacks
         any_mood_q,
+        artist_q,
+        # 13. Bare fallback
         Q(),
     ]
 
@@ -458,7 +430,7 @@ def _feedback_score_map(*, user_id, mood_label: str, tracks: list[Track]) -> dic
     return {str(track_id): score for track_id, score in rows}
 
 
-def _resolve_type_weights(*, user_id, mood_label: str, music_preference: str | None) -> dict[str, float]:
+def _resolve_type_weights(*, user_id, mood_label: str) -> dict[str, float]:
     default_weights = dict(MOOD_TYPE_RATIOS.get(mood_label, MOOD_TYPE_RATIOS["focused"]))
     preference = UserMoodPreference.objects.filter(
         userId_id=user_id,
@@ -471,9 +443,6 @@ def _resolve_type_weights(*, user_id, mood_label: str, music_preference: str | N
             "ambient": preference.ambientWeight,
         }
 
-    override = MUSIC_PREFERENCE_OVERRIDES.get(music_preference)
-    if override:
-        return dict(override)
     return default_weights
 
 
@@ -484,9 +453,7 @@ def _score_track(
     secondary_mood: str | None = None,
     mood_blend_ratio: float = 1.0,
     type_weights: dict[str, float],
-    music_preference: str | None,
     music_language: str | None,
-    music_style: str | None,
     playlist_goal: str | None,
     preferred_artist: str | None,
     era_preference: str | None = None,
@@ -523,17 +490,9 @@ def _score_track(
         if track.valence is not None:
             score += max(0.0, 1 - abs(track.valence - target["valence"])) * 0.08
 
-    if music_preference == "lyrics" and not track.isInstrumental:
-        score += 0.14
-    if music_preference == "no_lyrics" and (track.isInstrumental or track.type != Track.TypeChoices.SONG):
-        score += 0.18
-    if music_preference == "background" and track.type == Track.TypeChoices.AMBIENT:
-        score += 0.22
-
     score += _taste_score(
         track=track,
         music_language=music_language,
-        music_style=music_style,
         playlist_goal=playlist_goal,
         preferred_artist=preferred_artist,
         time_of_day=time_of_day,
@@ -559,7 +518,6 @@ def _taste_score(
     *,
     track: Track,
     music_language: str | None,
-    music_style: str | None,
     playlist_goal: str | None,
     preferred_artist: str | None,
     time_of_day: str | None = None,
@@ -568,8 +526,6 @@ def _taste_score(
     language = _normalise(track.language)
     genre = _normalise(track.genre)
     region = _normalise(track.region)
-    raga_name = _normalise(track.ragaName)
-    classical_form = _normalise(track.classicalForm)
     artist_name = _normalise(getattr(track.artistId, "name", ""))
 
     requested_languages = _parse_language_pref(music_language)
@@ -596,34 +552,6 @@ def _taste_score(
             # Hard penalty: user explicitly requested a language — tracks that
             # don't match it should rank far below matching ones.
             score -= 0.55
-
-    requested_style = _normalise(music_style)
-    if requested_style and requested_style != "no_preference":
-        if requested_style == genre:
-            score += 0.40
-        elif requested_style == "bollywood" and (language == "hindi" or genre == "bollywood" or region == "india"):
-            score += 0.36
-        elif requested_style == "hollywood" and (language == "english" or region in {"us", "uk"}):
-            score += 0.30
-        elif requested_style == "classical" and (classical_form or genre == "classical"):
-            score += 0.34
-        elif requested_style == "raga" and (raga_name or genre == "raga"):
-            score += 0.36
-        elif requested_style == "marathi" and (language == "marathi" or region == "maharashtra" or genre == "marathi"):
-            score += 0.36
-        elif requested_style == "instrumental" and (track.isInstrumental or track.type != Track.TypeChoices.SONG):
-            score += 0.36
-        elif requested_style == "lofi" and genre in {"lo-fi", "lofi", "chill", "ambient"}:
-            score += 0.32
-        elif requested_style == "indie" and genre in {"indie", "indie-pop", "alternative"}:
-            score += 0.30
-        elif requested_style == "pop" and genre in {"pop", "dance-pop", "synth-pop"}:
-            score += 0.30
-        elif requested_style == "devotional" and genre in {"devotional", "spiritual", "bhajan"}:
-            score += 0.36
-        else:
-            # Explicit style mismatch penalty
-            score -= 0.25
 
     requested_goal = _normalise(playlist_goal)
     if requested_goal == "focus" and track.primaryMood == "focused":
@@ -831,35 +759,6 @@ def _language_query(music_language: str | None) -> Q:
     return combined
 
 
-def _style_query(music_style: str | None) -> Q:
-    requested_style = _normalise(music_style)
-    if not requested_style or requested_style == "no_preference":
-        return Q()
-    if requested_style == "bollywood":
-        return Q(genre__icontains="bollywood") | Q(language__iexact="hindi") | Q(region__iexact="india")
-    if requested_style == "hollywood":
-        return Q(language__iexact="english") | Q(region__iexact="us")
-    if requested_style == "classical":
-        return Q(classicalForm__isnull=False) & ~Q(classicalForm="")
-    if requested_style == "raga":
-        return (Q(ragaName__isnull=False) & ~Q(ragaName="")) | Q(genre__icontains="raga")
-    if requested_style == "marathi":
-        return Q(language__iexact="marathi") | Q(region__icontains="maharashtra") | Q(genre__icontains="marathi")
-    if requested_style == "instrumental":
-        return Q(isInstrumental=True) | Q(type__in=[Track.TypeChoices.INSTRUMENTAL, Track.TypeChoices.AMBIENT])
-    return Q(genre__iexact=requested_style) | Q(genre__icontains=requested_style)
-
-
-def _type_query(music_preference: str | None) -> Q:
-    if music_preference == "lyrics":
-        return Q(type=Track.TypeChoices.SONG) | Q(isInstrumental=False)
-    if music_preference == "no_lyrics":
-        return Q(isInstrumental=True) | Q(type__in=[Track.TypeChoices.INSTRUMENTAL, Track.TypeChoices.AMBIENT])
-    if music_preference == "background":
-        return Q(type=Track.TypeChoices.AMBIENT) | Q(type=Track.TypeChoices.INSTRUMENTAL)
-    return Q()
-
-
 def _artist_query(preferred_artist: str | None) -> Q:
     artist_query = _normalise(preferred_artist)
     if not artist_query or artist_query in {"any", "none", "no_preference"}:
@@ -891,11 +790,7 @@ def _base_title(title: str) -> str:
     return t.strip().lower()
 
 
-def _selection_reason(*, track: Track, mood_label: str, music_preference: str | None) -> str:
-    if music_preference == "background" and track.type == Track.TypeChoices.AMBIENT:
-        return PlaylistTrack.SelectionReason.TAG_MATCH
-    if music_preference == "surprise":
-        return PlaylistTrack.SelectionReason.NOVELTY
+def _selection_reason(*, track: Track, mood_label: str) -> str:
     if track.primaryMood == mood_label:
         return PlaylistTrack.SelectionReason.MOOD_MATCH
     return PlaylistTrack.SelectionReason.FALLBACK

@@ -52,9 +52,7 @@ _CODE_LENGTH = 6
 #  - safest:     pick the most restrictive value (used for explicit-content gates)
 _MERGE_STRATEGY = {
     "music_language": "union_list",
-    "music_style":    "majority",
     "music_era":      "majority",
-    "music_preference": "majority",
     "playlist_goal":  "majority",
     "preferred_artist": "majority",
     "time_of_day":    "majority",

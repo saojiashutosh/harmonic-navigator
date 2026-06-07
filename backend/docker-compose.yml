@@ -11,11 +11,11 @@ services:
       - |
         set -e
 
-        # Migrations are a one-time manual step — the remote DB keeps its
-        # schema, so we do NOT run them on every startup. When the models
-        # change, run once:
-        #   docker compose exec web python manage.py makemigrations
-        #   docker compose exec web python manage.py migrate
+        # Local Postgres starts empty, so apply migrations on every startup.
+        # migrate is idempotent — it no-ops once the schema is in place.
+        echo "Applying database migrations..."
+        python manage.py migrate --no-input
+
         echo "Checking whether full-DB bootstrap is needed..."
         if python manage.py shell -c "from tracks.models import Track; raise SystemExit(0 if Track.objects.exists() else 1)"; then
           echo "Tracks already exist, skipping Excel import."
@@ -35,25 +35,14 @@ services:
       DJANGO_SETTINGS_MODULE: core.settings.development
       DJANGO_DEBUG: "true"
       DJANGO_ALLOWED_HOSTS: "*"
-      # --- Default: CockroachDB Cloud (shared remote DB) ---
-      DB_ENGINE: django_cockroachdb
-      DB_NAME: ${DB_NAME:-defaultdb}
-      DB_USER: ${DB_USER:-ashutosh}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT:-26257}
-      # Switch to verify-full + DB_SSL_ROOT_CERT=/certs/cc-ca.crt once you place
-      # the CA cert (download from CockroachDB Cloud console → Connect → CA cert).
-      DB_SSL_MODE: require
-      # --- For local testing / development: use the local "db" service below
-      #     instead. Comment out the CockroachDB block above and uncomment this: ---
-      # DB_ENGINE: django.db.backends.postgresql
-      # DB_NAME: ${POSTGRES_DB:-postgres}
-      # DB_USER: ${POSTGRES_USER:-postgres}
-      # DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      # DB_HOST: db
-      # DB_PORT: 5432
-      # DB_SSL_MODE: disable
+      # --- Local PostgreSQL (the "db" service below) ---
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_SSL_MODE: disable
       IMPORT_TRACKS_ON_STARTUP: ${IMPORT_TRACKS_ON_STARTUP:-auto}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       REDIS_URL: redis://redis:6379/0
@@ -64,9 +53,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      # For local testing / development, also wait on the local "db" service:
-      # db:
-      #   condition: service_healthy
+      db:
+        condition: service_healthy
 
   redis:
     image: redis:7-alpine
@@ -78,26 +66,21 @@ services:
       timeout: 5s
       retries: 10
 
-  # --- Local Postgres for local testing / development only ---
-  # Not started by default. To use it: uncomment this service, the "db"
-  # entry under web.depends_on, the local DB_* env block under web, and the
-  # volumes block at the bottom. Then run `docker compose up --build`.
-  # db:
-  #   image: postgres:14-alpine
-  #   environment:
-  #     POSTGRES_DB: ${POSTGRES_DB:-postgres}
-  #     POSTGRES_USER: ${POSTGRES_USER:-postgres}
-  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-  #   ports:
-  #     - "5433:5432"
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 10
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-# Local-testing volume for the commented-out "db" service above.
-# volumes:
-#   postgres_data:
+volumes:
+  postgres_data:
