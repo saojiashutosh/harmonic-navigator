@@ -5,10 +5,8 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# ffmpeg: required so librosa/audioread can decode JioSaavn's AAC/.mp4
-# audio streams (libsndfile alone cannot read AAC).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libsndfile1 ffmpeg dos2unix ca-certificates \
+    && apt-get install -y --no-install-recommends build-essential libsndfile1 dos2unix ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
