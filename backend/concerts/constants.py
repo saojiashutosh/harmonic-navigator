@@ -13,7 +13,7 @@ MIN_ARTIST_MATCH_LENGTH = 4
 
 # How many JioSaavn search results to pull when topping up a concert artist
 # whose local catalog is too thin to fill the playlist.
-ONLINE_FETCH_LIMIT = 80
+ONLINE_FETCH_LIMIT = 30
 
 # Concert playlists recommend Bollywood (Hindi) and Marathi songs only.
 CONCERT_LANGUAGES = ("hindi", "marathi")

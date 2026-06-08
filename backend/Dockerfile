@@ -7,8 +7,6 @@ ENV DJANGO_SETTINGS_MODULE=core.settings.production
 
 WORKDIR /app
 
-# ffmpeg: required so librosa/audioread can decode JioSaavn's AAC/.mp4
-# audio streams (libsndfile alone cannot read AAC).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential libsndfile1 ffmpeg ca-certificates \
     && rm -rf /var/lib/apt/lists/*

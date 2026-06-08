@@ -9,9 +9,6 @@ django-cors-headers==4.3.1
 psycopg2-binary==2.9.9
 pandas==2.2.0
 numpy==1.26.4
-# Capped <1.13: scipy 1.13 removed scipy.signal.hann, which librosa 0.10.1
-# still calls inside beat_track.
-scipy>=1.9,<1.13
 scikit-learn==1.4.0
 librosa==0.10.1
 gunicorn==21.2.0
@@ -27,6 +24,3 @@ django-redis==5.4.0
 channels==4.2.0
 channels-redis==4.2.1
 daphne==4.1.2
-# Capped <81: setuptools 81 removed the bundled `pkg_resources`, which
-# librosa 0.10.1 still imports at load time.
-setuptools>=69.0.0,<81
