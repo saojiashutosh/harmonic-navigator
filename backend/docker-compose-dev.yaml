@@ -1,10 +1,14 @@
-name: harmonic-navigator
+name: harmonic-navigator-dev
+
+# Full local stack for development: Django (dev) + a local Redis + a local
+# Postgres. Mirrors production wiring but everything runs on your machine.
+#   docker-compose -f docker-compose-dev.yaml up --build
 
 services:
   web:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     command:
       - /bin/sh
       - -c
