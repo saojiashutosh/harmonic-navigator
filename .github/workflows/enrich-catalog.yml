@@ -1,0 +1,105 @@
+name: Enrich catalog (import + analyze against Neon)
+
+# Runs the in-house feature-extraction engine (and, optionally, the JioSaavn
+# importer) against the PRODUCTION Neon database — on GitHub's runners, so it
+# keeps going whether or not your laptop is on. Free on GitHub-hosted runners.
+#
+# ──────────────────────────────────────────────────────────────────────────
+# ONE-TIME SETUP — add these repo secrets (Settings → Secrets and variables →
+# Actions → New repository secret). Values are the same Neon creds already in
+# your HF Space secrets / .env.prod:
+#   DB_NAME       e.g. neondb
+#   DB_USER       e.g. neondb_owner
+#   DB_PASSWORD   the Neon password
+#   DB_HOST       e.g. ep-...aws.neon.tech
+# (DB_PORT and DB_SSL_MODE are not secret and are set below.)
+# ──────────────────────────────────────────────────────────────────────────
+
+on:
+  # Manual run: Actions tab → this workflow → "Run workflow".
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max tracks to analyze this run (batch size)"
+        required: false
+        default: "200"
+      delay:
+        description: "Seconds between JioSaavn downloads (be kind)"
+        required: false
+        default: "1.0"
+      run_import:
+        description: "Also import new metadata-only songs into Neon first?"
+        type: boolean
+        required: false
+        default: false
+      import_args:
+        description: "Args for import_saavn_songs (used only if run_import=true)"
+        required: false
+        default: "--language hindi --start-year 2000 --end-year 2019 --per-year 50 --metadata-only"
+  # Hands-off mode: clears the backlog in batches without anyone clicking.
+  # Each run analyzes `default` tracks above. Remove or widen this cron if you
+  # want to limit GitHub Actions minutes (matters only on private repos).
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours
+
+# Never let two runs hammer Neon (and double-process the same tracks) at once.
+concurrency:
+  group: enrich-catalog
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350   # stay under GitHub's 6h job ceiling
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # Management commands only need DB access; Redis/Groq/Spotify are unused.
+      DJANGO_SETTINGS_MODULE: core.settings.production
+      DJANGO_DEBUG: "false"
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: "5432"
+      DB_SSL_MODE: require
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install audio codecs (ffmpeg decodes JioSaavn AAC/.mp4; libsndfile for librosa)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libsndfile1
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify Neon connection
+        run: python manage.py shell -c "from django.db import connection; connection.ensure_connection(); print('Connected to', connection.settings_dict['HOST'])"
+
+      - name: Import new songs (optional)
+        if: ${{ github.event.inputs.run_import == 'true' }}
+        run: python manage.py import_saavn_songs ${{ github.event.inputs.import_args }}
+
+      - name: Extract features (in-house engine)
+        run: |
+          python manage.py analyze_tracks \
+            --limit "${{ github.event.inputs.limit || '200' }}" \
+            --delay "${{ github.event.inputs.delay || '1.0' }}"
+
+      - name: Remaining backlog
+        if: always()
+        run: |
+          python manage.py shell -c "from tracks.models import Track; from django.db.models import Q; print('Tracks still missing features:', Track.objects.filter(Q(energy__isnull=True)|Q(valence__isnull=True)|Q(tempoBpm__isnull=True)).count())"
