@@ -9,9 +9,14 @@ Usage:
     python manage.py import_saavn_songs --language hindi   # one language
     python manage.py import_saavn_songs --language hindi --start-year 2000 --end-year 2009
     python manage.py import_saavn_songs --per-year 50      # default target
+    python manage.py import_saavn_songs --metadata-only    # leave features NULL
 
 The command is safe to re-run — it skips tracks already in the DB and
 stops fetching a (year, language) bucket as soon as it is full.
+
+With --metadata-only the tracks are imported with title/artist/year/duration
+only; energy/valence/tempo/mood are left NULL so the in-house DSP engine
+(`python manage.py analyze_tracks`) can extract real features afterwards.
 """
 from __future__ import annotations
 
@@ -286,6 +291,12 @@ class Command(BaseCommand):
             "--delay", type=float, default=0.4,
             help="Seconds to sleep between API requests (be kind to JioSaavn).",
         )
+        parser.add_argument(
+            "--metadata-only", action="store_true",
+            help="Import title/artist/year/duration only and leave energy/valence/"
+                 "acousticness/mood NULL so the in-house engine (analyze_tracks) "
+                 "fills real features later. Skips the keyword-hash pseudo-features.",
+        )
 
     def handle(self, *args, **options):
         lang_arg   = options["language"].lower()
@@ -294,6 +305,7 @@ class Command(BaseCommand):
         per_year   = options["per_year"]
         max_pages  = options["max_pages"]
         delay      = options["delay"]
+        metadata_only = options["metadata_only"]
 
         if lang_arg == "all":
             languages = list(LANGUAGE_QUERIES.keys())
@@ -384,27 +396,32 @@ class Command(BaseCommand):
                             artist_cache[ak] = artist
                         artist_obj = artist_cache[ak]
 
-                        mood    = _infer_mood_from_title(title)
-                        energy, valence = _pseudo_energy_valence(saavn_id or title, mood)
-
-                        with transaction.atomic():
-                            Track.objects.create(
-                                title=title,
-                                artistId=artist_obj,
-                                type=Track.TypeChoices.SONG,
-                                source=Track.SourceChoices.MANUAL,
-                                language=language,
-                                releaseYear=year,
-                                durationMs=parsed["duration_ms"],
+                        create_kwargs = dict(
+                            title=title,
+                            artistId=artist_obj,
+                            type=Track.TypeChoices.SONG,
+                            source=Track.SourceChoices.MANUAL,
+                            language=language,
+                            releaseYear=year,
+                            durationMs=parsed["duration_ms"],
+                            genre=parsed.get("genre"),
+                            isInstrumental=False,
+                            isExplicit=parsed.get("is_explicit", False),
+                            isActive=True,
+                        )
+                        if not metadata_only:
+                            # Keyword-hash pseudo-features (in-house engine off)
+                            mood = _infer_mood_from_title(title)
+                            energy, valence = _pseudo_energy_valence(saavn_id or title, mood)
+                            create_kwargs.update(
                                 energy=energy,
                                 valence=valence,
                                 acousticness=round(0.3 + ((energy - 0.3) * -0.5), 3),
                                 primaryMood=mood,
-                                genre=parsed.get("genre"),
-                                isInstrumental=False,
-                                isExplicit=parsed.get("is_explicit", False),
-                                isActive=True,
                             )
+
+                        with transaction.atomic():
+                            Track.objects.create(**create_kwargs)
 
                         year_counts[year] = year_counts.get(year, 0) + 1
                         created_lang += 1
