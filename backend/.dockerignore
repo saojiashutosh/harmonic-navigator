@@ -10,3 +10,16 @@ __pycache__
 .mypy_cache
 db.sqlite3
 staticfiles
+
+# Local env files must never leak into an image.
+.env
+.env.*
+
+# Dev-only / oversized data. Production reads nothing from here (Neon holds the
+# data, seeded once from a dev machine). spotify_dataset.csv is 20MB — over HF's
+# 10MB-per-file git warning threshold. The dev stack still sees these via the
+# bind mount in docker-compose-dev.yaml, so excluding them from the image is safe.
+data/*.csv
+data/*.log
+data/exports/
+data/regression_reports/

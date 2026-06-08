@@ -1,9 +1,11 @@
 import HS from './utils/HarmonicShared';
 
-// API calls go same-origin (e.g. /moods/..., /groups/...). Vite's dev server
-// proxies those paths to Django on :8000 — see vite.config.js. This means the
-// phone only ever needs to reach the Vite port; the backend stays internal.
-const BASE_URL = '';
+// In dev, VITE_API_URL is unset so calls go same-origin (e.g. /moods/...) and
+// Vite's dev server proxies them to Django on :8000 — see vite.config.js. In
+// production (Vercel) there is no proxy, so VITE_API_URL points at the Hugging
+// Face backend (e.g. https://<user>-<space>.hf.space) and calls go cross-origin.
+const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const BASE_URL = API_URL;
 
 // Strip HTML entities from the user-visible string fields of a track object.
 // Upstream sources (e.g. JioSaavn) occasionally serve titles like
@@ -320,9 +322,19 @@ export const generateGroupPlaylist = async (groupId) => {
 // forwards it to Django; the scheme tracks the page (wss:// on HTTPS). The
 // participant id lets the backend tell whether this socket is the host.
 export const groupSessionSocketUrl = (groupId, participantId) => {
-  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  // In dev the socket is same-origin (Vite proxies /ws to Django). In prod it
+  // must hit the HF backend directly — Vercel can't proxy WebSockets — so derive
+  // host + scheme from VITE_API_URL when set, falling back to the current page.
+  let host = window.location.host;
+  let secure = window.location.protocol === 'https:';
+  if (API_URL) {
+    const u = new URL(API_URL);
+    host = u.host;
+    secure = u.protocol === 'https:';
+  }
+  const scheme = secure ? 'wss' : 'ws';
   const query = participantId ? `?participant=${encodeURIComponent(participantId)}` : '';
-  return `${scheme}://${window.location.host}/ws/groups/${groupId}/${query}`;
+  return `${scheme}://${host}/ws/groups/${groupId}/${query}`;
 };
 
 /**

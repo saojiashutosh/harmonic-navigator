@@ -18,8 +18,6 @@ def pool_cache_key(
     secondary_mood: str | None,
     social_setting: str | None,
     music_language: str | None,
-    music_style: str | None,
-    music_preference: str | None,
     preferred_artist: str | None,
     era_preference: str | None,
 ) -> str:
@@ -28,8 +26,6 @@ def pool_cache_key(
         "secondary": secondary_mood,
         "social": social_setting,
         "lang": music_language,
-        "style": music_style,
-        "pref": music_preference,
         "artist": preferred_artist,
         "era": era_preference,
     }

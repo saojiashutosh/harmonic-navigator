@@ -75,7 +75,7 @@ class MoodFlowTests(APITestCase):
                     {"question_key": "mental_state", "raw_value": "sharp"},
                     {"question_key": "activity", "raw_value": "working"},
                     {"question_key": "social_setting", "raw_value": "alone"},
-                    {"question_key": "music_preference", "raw_value": "lyrics"},
+                    {"question_key": "music_language", "raw_value": "hindi"},
                 ]
             },
             format="json",
@@ -125,7 +125,6 @@ class MoodFlowTests(APITestCase):
             ("mental_state", "sharp"),
             ("activity", "working"),
             ("social_setting", "alone"),
-            ("music_preference", "lyrics"),
             ("playlist_goal", "focus"),
         ]
 
@@ -152,7 +151,6 @@ class MoodFlowTests(APITestCase):
             ("mental_state", "drifting"),
             ("activity", "relaxing"),
             ("social_setting", "alone"),
-            ("music_preference", "lyrics"),
             ("playlist_goal", "escape"),
         ]
         responses = _make_responses(question_map, answers)
@@ -171,7 +169,6 @@ class MoodFlowTests(APITestCase):
             ("mental_state", "motivated"),
             ("activity", "social"),
             ("social_setting", "others"),
-            ("music_preference", "lyrics"),
             ("playlist_goal", "party"),
         ]
         responses = _make_responses(question_map, answers)
@@ -191,7 +188,6 @@ class MoodFlowTests(APITestCase):
             ("mental_state", "drifting"),
             ("activity", "relaxing"),
             ("social_setting", "others"),
-            ("music_preference", "background"),
             ("playlist_goal", "relax"),
         ]
         responses = _make_responses(question_map, answers)
@@ -200,32 +196,6 @@ class MoodFlowTests(APITestCase):
         )
         self.assertEqual(mood, "calm")
         self.assertGreater(scores["calm"], scores["celebratory"])
-
-    def test_lofi_style_nudges_toward_calm_or_focused(self):
-        """music_style=lofi should nudge scores toward calm/focused."""
-        question_map = {q.key: q for q in Question.objects.all()}
-        # Neutral base with lofi style
-        answers = [
-            ("energy_level", "mid"),
-            ("emotional_tone", "calm"),
-            ("mental_state", "drifting"),
-            ("activity", "working"),
-            ("social_setting", "alone"),
-            ("music_preference", "no_lyrics"),
-            ("music_style", "lofi"),
-            ("playlist_goal", "focus"),
-        ]
-        responses = _make_responses(question_map, answers)
-        _, _, _, _, _, scores = infer_mood_from_responses(
-            responses, question_categories=_CATEGORY_MAP
-        )
-        # calm + focused should be the top-2
-        sorted_moods = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        top_two = {sorted_moods[0][0], sorted_moods[1][0]}
-        self.assertTrue(
-            top_two.issubset({"calm", "focused"}),
-            f"Expected calm/focused in top-2 but got {top_two}",
-        )
 
     def test_late_night_nudges_calm_melancholic(self):
         """time_of_day=late_night should push toward calm or melancholic."""
@@ -236,7 +206,6 @@ class MoodFlowTests(APITestCase):
             ("mental_state", "drifting"),
             ("activity", "relaxing"),
             ("social_setting", "alone"),
-            ("music_preference", "background"),
             ("playlist_goal", "sleep"),
             ("time_of_day", "late_night"),
         ]
@@ -256,7 +225,6 @@ class MoodFlowTests(APITestCase):
             ("mental_state", "motivated"),
             ("activity", "exercising"),
             ("social_setting", "alone"),
-            ("music_preference", "surprise"),
         ]
         responses = _make_responses(question_map, answers)
         _, secondary, _, sec_conf, blend, _ = infer_mood_from_responses(
@@ -275,7 +243,6 @@ class MoodFlowTests(APITestCase):
             ("mental_state", "sharp"),
             ("activity", "working"),
             ("social_setting", "alone"),
-            ("music_preference", "lyrics"),
         ]
         responses = _make_responses(question_map, answers)
         result = infer_mood_from_responses(
