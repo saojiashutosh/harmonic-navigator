@@ -317,6 +317,11 @@ _SAAVN_HEADERS = {
 
 _DES_KEY = b'38346591'
 
+# Reject JioSaavn matches below this title/artist confidence so a wrong song is
+# never served — the player skips the track instead (see MusicPlayer.jsx).
+# Mirrors the audio engine's match gate (tracks/analysis/audio_source.py).
+_SAAVN_MIN_MATCH = 0.5
+
 
 def _decrypt_saavn_url(encrypted_url: str) -> str:
     enc_bytes = base64.b64decode(encrypted_url)
@@ -371,33 +376,61 @@ def saavn_search(request):
         return r.json().get('results') or []
 
     def _words(text):
-        return set(re.sub(r'[^\w\s]', '', (text or '').lower()).split())
+        return set(re.sub(r'[^\w\s]', ' ', (text or '').lower()).split())
+
+    def _contained(query_words, target_words):
+        """Fraction of query_words present in target_words (asymmetric, 0-1)."""
+        if not query_words:
+            return 0.0
+        return len(query_words & target_words) / len(query_words)
+
+    def _result_language(result):
+        return (result.get('language') or '').strip().lower()
 
     def _score_result(result, target_title_words, target_artist_words):
+        # Asymmetric containment: how much of the *requested* title/artist the
+        # candidate covers. Robust to JioSaavn's longer official titles, and
+        # (unlike raw overlap) it never rewards a candidate just for being short.
         song_title = result.get('song') or result.get('title') or ''
+        title_score = _contained(target_title_words, _words(song_title))
+        if not target_artist_words:
+            return title_score
         song_artist = result.get('primary_artists') or result.get('singers') or ''
-        title_words = _words(song_title)
-        artist_words = _words(song_artist)
-        if not title_words or not target_title_words:
-            return 0.0
-        title_overlap = len(target_title_words & title_words) / max(len(target_title_words), len(title_words))
-        artist_bonus = 0.25 if (target_artist_words and target_artist_words & artist_words) else 0.0
-        return title_overlap + artist_bonus
+        artist_score = _contained(target_artist_words, _words(song_artist))
+        return 0.6 * title_score + 0.4 * artist_score
 
-    def _best_match(candidates, target_title_words, target_artist_words):
+    def _best_match(candidates, target_title_words, target_artist_words,
+                    target_language=''):
+        # Drop cross-language collisions first: JioSaavn often has several songs
+        # sharing a title across languages (e.g. a Hindi "Gondhal" alongside the
+        # Marathi one). Without this a Marathi track can play a Hindi recording.
+        if target_language:
+            same_lang = [c for c in candidates
+                         if not _result_language(c)
+                         or _result_language(c) == target_language]
+            if same_lang:  # only narrow when something is left to match
+                candidates = same_lang
         if not candidates:
             return None
-        scored = [(c, _score_result(c, target_title_words, target_artist_words)) for c in candidates]
+        scored = [(c, _score_result(c, target_title_words, target_artist_words))
+                  for c in candidates]
         scored.sort(key=lambda x: x[1], reverse=True)
-        return scored[0][0]
+        best, best_score = scored[0]
+        # Below the gate it's almost certainly the wrong song; return nothing so
+        # the caller 404s and the player skips, rather than serving garbage.
+        if best_score < _SAAVN_MIN_MATCH:
+            return None
+        return best
 
     # Determine what to match against — prefer DB title/artist over raw query
     if track:
         _target_title = track.title or query
         _target_artist = track.artistId.name if track.artistId else ''
+        _target_language = (track.language or '').strip().lower()
     else:
         _target_title = query
         _target_artist = ''
+        _target_language = ''
 
     _title_words = _words(_target_title)
     _artist_words = _words(_target_artist)
@@ -421,12 +454,14 @@ def saavn_search(request):
                 seen.add(sid)
                 unique.append(c)
 
-        song = _best_match(unique, _title_words, _artist_words)
+        song = _best_match(unique, _title_words, _artist_words, _target_language)
 
-        # Fallback: if no candidates at all, try dropping artist from original query
+        # Fallback: if nothing cleared the gate, retry with a trimmed query
+        # (drops a trailing artist word) but keep the same confidence gate.
         if not song and ' ' in query:
             short = query.rsplit(' ', 1)[0]
-            song = _best_match(_fetch_songs(short), _title_words, _artist_words)
+            song = _best_match(_fetch_songs(short), _title_words, _artist_words,
+                               _target_language)
 
         if not song:
             return Response({"error": "No results found."}, status=status.HTTP_404_NOT_FOUND)
