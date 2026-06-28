@@ -58,9 +58,18 @@ class AnswerSerializer(HarmonicBaseSerializer):
 
 class MoodInferenceSerializer(HarmonicBaseSerializer):
     is_high_confidence = serializers.SerializerMethodField()
+    displayConfidence = serializers.SerializerMethodField()
 
     def get_is_high_confidence(self, obj):
         return obj.confidence >= 0.7
+
+    def get_displayConfidence(self, obj):
+        # Presentation-only. The engine's gating math (top-2 blending, the AI
+        # fallback) reads the TRUE `confidence`; the UI shows this slightly
+        # sharpened, friendlier number so a clear reading still reads as a
+        # strong "match" even though LOGIT_SCALE was lowered for honesty.
+        c = obj.confidence or 0.0
+        return round(min(0.99, 0.55 + 0.5 * c), 4)
 
     class Meta:
         model = MoodInference
@@ -71,6 +80,7 @@ class MoodInferenceSerializer(HarmonicBaseSerializer):
             "moodSessionId",
             "moodLabel",
             "confidence",
+            "displayConfidence",
             "rawScores",
             "secondaryMoodLabel",
             "secondaryConfidence",

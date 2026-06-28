@@ -15,10 +15,13 @@ logger = logging.getLogger(__name__)
 
 # Softmax temperature for converting mood logit-sums into probabilities.
 # Higher = sharper distribution = the top mood pulls further ahead of runners-up.
-# 2.4 produced ~60-80% confidence for typical answer patterns over 6 mood
-# classes, which read as low-confidence in the UI. 4.0 yields ~85-95% for
-# the same answers — closer to what users intuitively expect from a "match".
-LOGIT_SCALE = 4.0
+# 4.0 was chosen purely so the UI number looked high, but it pinned even
+# genuinely-ambiguous answers at ~98%, which made `confidence` meaningless and
+# kept it permanently above LOW_CONFIDENCE_THRESHOLD / the AI-fallback gate —
+# silently disabling top-2 blending and the Groq fallback. 2.6 lets confidence
+# reflect real ambiguity again; the UI shows a separate, friendlier
+# `displayConfidence` (see MoodInferenceSerializer) so demos still read well.
+LOGIT_SCALE = 2.6
 
 # Below this confidence, the engine blends top-2 moods equally.
 LOW_CONFIDENCE_THRESHOLD = 0.40

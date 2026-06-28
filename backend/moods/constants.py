@@ -412,14 +412,10 @@ QUESTION_WEIGHTS = {
         "focused": -0.05,
         "anxious": -0.03,
     },
-    "music_language_english": {
-        "energized": 0.08,
-        "celebratory": 0.06,
-        "focused": 0.04,
-        "calm": -0.02,
-        "melancholic": -0.02,
-        "anxious": -0.02,
-    },
+    # NOTE: no "english" entry — the catalogue is 100% Hindi/Marathi and the
+    # music_language question only offers hindi / marathi / no_preference, so an
+    # "english" answer can never be submitted (it would also yield an empty
+    # playlist). Re-add this row only alongside real English catalogue tracks.
     "music_language_marathi": {
         "calm": 0.10,
         "melancholic": 0.08,
@@ -536,6 +532,25 @@ QUESTION_WEIGHTS = {
         "calm": 0.00, "melancholic": 0.00, "anxious": 0.00,
     },
 }
+
+# ---------------------------------------------------------------------------
+# Decouple non-emotional questions from FELT-MOOD inference.
+# These answers still drive track *selection* downstream in the playlists app:
+#   - playlist_goal -> the GOAL_MOOD_OVERRIDES blend (playlists/services.py)
+#   - music_era     -> the era filter / _era_score
+#   - time_of_day   -> the _taste_score time-of-day nudges
+# but they must NOT decide how the user *feels*. Letting them do so meant a
+# change of clock or era could flip the inferred mood, and made playlist_goal
+# double-count (it both fed the inferred label AND hard-overrode it downstream,
+# so a happy user who picked "sleep" was inferred — and served — calm). Felt
+# mood is now read only from emotion / energy / mental-state / activity /
+# social / language. Synergy bonuses still use these rawValues inside coherent
+# multi-answer combos (see SYNERGY_BONUSES), which is a legitimate felt signal.
+_MOOD_DECOUPLED_PREFIXES = ("playlist_goal_", "time_of_day_", "music_era_")
+for _weight_key in list(QUESTION_WEIGHTS):
+    if _weight_key.startswith(_MOOD_DECOUPLED_PREFIXES):
+        QUESTION_WEIGHTS[_weight_key] = dict.fromkeys(QUESTION_WEIGHTS[_weight_key], 0.0)
+del _weight_key
 
 # ---------------------------------------------------------------------------
 # Per-option intensity values — all 1.0.

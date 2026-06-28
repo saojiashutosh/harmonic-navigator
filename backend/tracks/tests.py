@@ -1,9 +1,11 @@
 import tempfile
 import zipfile
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from django.test import override_settings
+from django.core.management import call_command
+from django.test import TestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -197,6 +199,51 @@ class TrackServicesTests(APITestCase):
         self.assertIn("91", sheet_xml)
         self.assertIn("Yaman", sheet_xml)
         self.assertIn("bandish", sheet_xml)
+
+
+class RederiveMoodsCommandTests(TestCase):
+    """The reversible re-label management command (rank 8)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.artist = Artist.objects.create(name="Relabel Artist", spotifyId="re-1")
+        # Mislabelled 'energized' but measured low-energy -> should become calm/melancholic.
+        cls.wrong = Track.objects.create(
+            title="Mislabelled", artistId=cls.artist, primaryMood="energized",
+            energy=0.22, valence=0.55, isActive=True,
+        )
+        # Correctly labelled celebratory -> unchanged.
+        cls.right = Track.objects.create(
+            title="Correct", artistId=cls.artist, primaryMood="celebratory",
+            energy=0.90, valence=0.90, isActive=True,
+        )
+        # NULL features -> must be left untouched (nothing to derive from).
+        cls.null = Track.objects.create(
+            title="Unmeasured", artistId=cls.artist, primaryMood="energized",
+            energy=None, valence=None, isActive=True,
+        )
+
+    def test_dry_run_changes_nothing(self):
+        out = StringIO()
+        call_command("rederive_moods", stdout=out)
+        self.wrong.refresh_from_db()
+        self.assertEqual(self.wrong.primaryMood, "energized")  # unchanged in dry-run
+        self.assertIn("DRY-RUN", out.getvalue())
+
+    def test_apply_relabels_feature_backed_and_skips_null(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            call_command("rederive_moods", "--apply", "--backup-dir", tmp, stdout=StringIO())
+            backups = list(Path(tmp).glob("primaryMood_backup_*.csv"))
+            self.assertEqual(len(backups), 1, "a reversible CSV backup must be written")
+
+        self.wrong.refresh_from_db()
+        self.right.refresh_from_db()
+        self.null.refresh_from_db()
+        self.assertNotEqual(self.wrong.primaryMood, "energized")  # re-derived
+        self.assertEqual(self.wrong.primaryMood,
+                         derive_primary_mood({"energy": 0.22, "valence": 0.55}))
+        self.assertEqual(self.right.primaryMood, "celebratory")   # already correct
+        self.assertEqual(self.null.primaryMood, "energized")      # untouched (NULL features)
 
 
 class TrackImportApiTests(APITestCase):

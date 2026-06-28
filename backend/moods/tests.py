@@ -197,8 +197,10 @@ class MoodFlowTests(APITestCase):
         self.assertEqual(mood, "calm")
         self.assertGreater(scores["calm"], scores["celebratory"])
 
-    def test_late_night_nudges_calm_melancholic(self):
-        """time_of_day=late_night should push toward calm or melancholic."""
+    def test_low_energy_calm_answers_resolve_calm_or_melancholic(self):
+        """Low-energy, calm-emotion answers resolve to calm/melancholic from the
+        FELT signals alone — without leaning on time_of_day or playlist_goal,
+        which are now decoupled from mood (see decoupling test below)."""
         question_map = {q.key: q for q in Question.objects.all()}
         answers = [
             ("energy_level", "low"),
@@ -206,14 +208,62 @@ class MoodFlowTests(APITestCase):
             ("mental_state", "drifting"),
             ("activity", "relaxing"),
             ("social_setting", "alone"),
-            ("playlist_goal", "sleep"),
-            ("time_of_day", "late_night"),
         ]
         responses = _make_responses(question_map, answers)
         mood, _, _, _, _, scores = infer_mood_from_responses(
             responses, question_categories=_CATEGORY_MAP
         )
         self.assertIn(mood, {"calm", "melancholic"})
+
+    def test_goal_era_time_do_not_change_felt_mood(self):
+        """Fix 7 / goal double-count: with fixed emotional answers, changing only
+        playlist_goal, music_era and time_of_day must NOT change the inferred
+        mood. Previously a happy user who picked goal=sleep was inferred 'calm',
+        and changing the clock/era alone could flip the label."""
+        question_map = {q.key: q for q in Question.objects.all()}
+        felt = [
+            ("energy_level", "charged"),
+            ("emotional_tone", "happy"),
+            ("mental_state", "motivated"),
+            ("activity", "social"),
+        ]
+
+        def mood_for(extra):
+            responses = _make_responses(question_map, felt + extra)
+            return infer_mood_from_responses(responses, question_categories=_CATEGORY_MAP)[0]
+
+        baseline = mood_for([])
+        self.assertIn(baseline, {"celebratory", "energized"})
+        # None of these non-emotional choices may move the felt-mood label.
+        self.assertEqual(baseline, mood_for([("playlist_goal", "sleep")]))
+        self.assertEqual(baseline, mood_for([("playlist_goal", "relax")]))
+        self.assertEqual(baseline, mood_for([("time_of_day", "late_night")]))
+        self.assertEqual(baseline, mood_for([("music_era", "nineties")]))
+        self.assertEqual(
+            baseline,
+            mood_for([("playlist_goal", "sleep"), ("music_era", "nineties"),
+                      ("time_of_day", "late_night")]),
+        )
+
+    def test_submit_response_exposes_friendly_display_confidence(self):
+        """displayConfidence is present, never below the true confidence, and
+        capped so the UI reads well without re-inflating the gating math."""
+        session = MoodSession.objects.create(userId=self.user)
+        response = self.client.post(
+            f"/moods/mood-sessions/{session.id}/submit/",
+            {"answers": [
+                {"question_key": "energy_level", "raw_value": "charged"},
+                {"question_key": "emotional_tone", "raw_value": "excited"},
+                {"question_key": "activity", "raw_value": "social"},
+            ]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn("displayConfidence", response.data)
+        disp = response.data["displayConfidence"]
+        true_conf = response.data["confidence"]
+        self.assertGreaterEqual(disp, true_conf)
+        self.assertLessEqual(disp, 0.99)
 
     def test_blend_ratio_is_low_for_ambiguous_answers(self):
         """When answers pull toward multiple moods, blend ratio < 1.0."""
