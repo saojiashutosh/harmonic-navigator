@@ -149,18 +149,33 @@ def _build_scored_tracklist(
 
     inferred_secondary = getattr(inference, "secondaryMoodLabel", None)
     mood_blend_ratio = getattr(inference, "moodBlendRatio", 1.0) or 1.0
+    inferred_mood = inference.moodLabel
+    inferred_confident = (inference.confidence or 0.0) >= 0.70
 
     if playlist_goal in GOAL_MOOD_OVERRIDES:
-        playlist_mood, secondary_mood = GOAL_MOOD_OVERRIDES[playlist_goal]
-        # When the override fires, the inferred mood blend no longer applies —
-        # we're deliberately not mixing in tracks of the original mood.
-        mood_blend_ratio = 0.85 if secondary_mood else 1.0
-    elif inference.moodLabel == "anxious":
-        # Anxious has no track pool of its own; ground the listener in calm.
+        playlist_mood, goal_secondary = GOAL_MOOD_OVERRIDES[playlist_goal]
+        # The goal answers "what should this music DO for me" and leads the
+        # playlist. But the old code then DISCARDED the inferred felt-mood
+        # entirely (ratio 1.0), so an excited user who asked to "relax" got a
+        # 100% calm playlist. When we have a confident, *different* reading of
+        # how they actually feel, keep a meaningful share of felt-mood tracks
+        # by carrying the inferred mood as the secondary and blending it in.
+        if inferred_confident and inferred_mood not in {playlist_mood, goal_secondary}:
+            secondary_mood = inferred_mood
+            mood_blend_ratio = 0.60   # goal-led, but a real felt-mood minority
+        else:
+            secondary_mood = goal_secondary
+            mood_blend_ratio = 0.85 if goal_secondary else 1.0
+    elif inferred_mood == "anxious":
+        # The catalogue has no "anxious" pool, so we deliberately serve calm,
+        # grounding music — paired with a little gentle "focused" material so it
+        # settles without feeling sleepy. The UI surfaces a note so an anxious
+        # reading visibly yields calming songs rather than silently swapping.
         playlist_mood = "calm"
-        secondary_mood = inferred_secondary
+        secondary_mood = "focused"
+        mood_blend_ratio = 0.70
     else:
-        playlist_mood = inference.moodLabel
+        playlist_mood = inferred_mood
         secondary_mood = inferred_secondary
 
     candidate_tracks = _build_candidate_pool(
@@ -230,12 +245,32 @@ def _build_scored_tracklist(
     accepted_tag_ids: set[str] = set()
     for m in accepted_moods:
         accepted_tag_ids |= mood_tag_ids.get(m, set())
-    mood_matched = [
-        (t, s) for t, s in scored_tracks
-        if t.primaryMood in accepted_moods or str(t.id) in accepted_tag_ids
-    ]
-    if len(mood_matched) >= max(limit // 2, 3):
-        scored_tracks = mood_matched
+
+    def _is_trusted_mood_match(track) -> bool:
+        tagged = str(track.id) in accepted_tag_ids
+        if not (track.primaryMood in accepted_moods or tagged):
+            return False
+        # A primaryMood label is only trustworthy when corroborated by an
+        # explicit mood tag OR by measured audio features. ~42% of the
+        # catalogue was bulk-stamped with a default mood and has NO measured
+        # features (energy IS NULL); keep those only as backfill so they can't
+        # crowd out genuinely-matching tracks.
+        if not tagged and track.energy is None:
+            return False
+        return True
+
+    mood_matched = [(t, s) for t, s in scored_tracks if _is_trusted_mood_match(t)]
+    if mood_matched:
+        # Graceful filter: trusted mood matches always lead; everything else
+        # (off-mood OR unverified) only BACKFILLS up to `limit`. The old code
+        # was all-or-nothing — it kept the whole jitter-ranked off-mood mix
+        # whenever matches were sparse, which is exactly when contamination is
+        # most visible. Keep a cushion past `limit` so the downstream dedupe /
+        # diversity steps still have material to work with.
+        matched_ids = {str(t.id) for t, _ in mood_matched}
+        backfill = [(t, s) for t, s in scored_tracks if str(t.id) not in matched_ids]
+        cushion = max(limit * 2, len(mood_matched) + limit)
+        scored_tracks = (mood_matched + backfill)[:cushion]
 
     # ── Hard era filter: when the user picks an era, that's a hard contract ──
     # Drop every track that doesn't match, even if the playlist ends up short.
@@ -468,9 +503,24 @@ def _score_track(
     primary_tag_ids = mood_tag_ids.get(mood_label, set())
     secondary_tag_ids = mood_tag_ids.get(secondary_mood, set()) if secondary_mood else set()
 
+    target = TARGET_TRACK_ATTRIBUTES.get(mood_label)
+
     # ── Primary mood match (primaryMood field OR mood tag) ────────────
     if track.primaryMood == mood_label or track_id_str in primary_tag_ids:
-        score += 0.50
+        is_tagged = track_id_str in primary_tag_ids
+        bonus = 0.50
+        if not is_tagged and track.energy is None:
+            # Unverified bulk-default label (no mood tag, no measured audio) —
+            # a weak signal, not a confirmed match. Give a fraction of the
+            # bonus so feature-backed matches always outrank it.
+            bonus = 0.20
+        elif target is not None and track.energy is not None:
+            # Label present AND measured: discount when the measured energy
+            # plainly contradicts the mood (e.g. a "calm"-labelled track at
+            # energy 0.7) — that is how ~43% of labelled tracks are wrong.
+            if abs(track.energy - target["energy"]) > 0.35:
+                bonus *= 0.5
+        score += bonus
     elif track.primaryMood:
         score += 0.04
 
@@ -483,7 +533,6 @@ def _score_track(
 
     score += type_weights.get(track.type, 0.0) * 0.18
 
-    target = TARGET_TRACK_ATTRIBUTES.get(mood_label)
     if target:
         if track.energy is not None:
             score += max(0.0, 1 - abs(track.energy - target["energy"])) * 0.12
@@ -504,9 +553,11 @@ def _score_track(
     if feedback_score is not None:
         score += feedback_score * 0.20
 
-    # Small random jitter breaks ties between tracks with nearly equal scores,
-    # ensuring playlist variety across sessions with identical preferences.
-    score += random.uniform(-0.04, 0.04)
+    # Tiny random jitter only to break ties between near-identical scores.
+    # Kept small on purpose: the old ±0.04 was ~13% of a typical score, big
+    # enough to reorder genuinely-better tracks and make identical answers
+    # return different (sometimes off-mood) songs each session.
+    score += random.uniform(-0.01, 0.01)
 
     # Cap raised from 1.5 → 4.0: the real max score (mood + language + style +
     # era + lyrics) is ~2.3, so 1.5 was clipping everything and making all
@@ -681,7 +732,11 @@ def _track_matches_era(track: Track, era_preference: str | None) -> bool:
         return False
     year = track.releaseYear
     if year is None:
-        return False
+        # Unknown era is "unknown", not "wrong". Keep the track — the soft
+        # -0.20 era penalty in _era_score still ranks confirmed-era tracks
+        # above it. Hard-dropping every NULL-year track used to collapse
+        # sparse era+mood+language pools to empty / off-mood fallbacks.
+        return True
     if era_preference == "latest":
         return year >= 2024
     if era_preference == "recent":
